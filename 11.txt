@@ -1,0 +1,113 @@
+er the primary trading symbol (e.g., EURUSD): EURUSD
+Enter an optional secondary trading symbol (e.g., XAUUSD, leave blank for none):
+Starting all services for EURUSD (and  if provided)...
+Running MT5 connection check...
+2025-10-14 02:13:29,889 - INFO - Initializing MetaTrader 5...
+2025-10-14 02:13:43,084 - INFO - Connecting to account #95263781 on MetaQuotes-Demo...
+2025-10-14 02:13:43,084 - INFO - --- Connection Successful ---
+2025-10-14 02:13:43,084 - INFO - mt5.last_error(): (1, 'Success')
+2025-10-14 02:13:43,760 - INFO - mt5.terminal_info(): Successfully retrieved terminal info.
+2025-10-14 02:13:43,760 - INFO -   - Terminal Name: MetaTrader 5
+2025-10-14 02:13:43,760 - INFO -   - Company: MetaQuotes Ltd.
+2025-10-14 02:13:43,760 - INFO -   - Connected: True
+2025-10-14 02:13:43,760 - INFO -   - DLLs allowed: True
+2025-10-14 02:13:43,770 - INFO - mt5.symbol_info('EURUSD'): Successfully retrieved symbol info.
+2025-10-14 02:13:43,770 - INFO -   - Price: 1.15664
+2025-10-14 02:13:43,770 - INFO - --- Connection Closed ---
+MT5 connection check passed.
+Starting data_downloader_api.py in background...
+Starting Docker services (RabbitMQ, InfluxDB, PostgreSQL)...
+time="2025-10-14T02:13:48+01:00" level=warning msg="C:\\Users\\EXT-PC\\tbot\\docker-compose.yml: the attribute `version` is obsolete, it will be ignored, please remove it to avoid potential confusion"
+[+] Running 5/5
+ ✔ Container tbot-postgresql-1         Running                                                                     0.0s
+ ✔ Container tbot-influxdb-1           Running                                                                     0.0s
+ ✔ Container tbot-rabbitmq-1           Running                                                                     0.0s
+ ✔ Container tbot-postgres_exporter-1  Running                                                                     0.0s
+ ✔ Container tbot-bot-1                Running                                                                     0.0s
+Waiting for RabbitMQ to be ready...
+ * Serving Flask app 'data_downloader_api'
+ * Debug mode: off
+2025-10-14 02:13:51,218 - INFO - WARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:9091
+ * Running on http://192.168.95.121:9091
+2025-10-14 02:13:51,218 - INFO - Press CTRL+C to quit
+RabbitMQ is ready.
+Starting mt5_watchdog.py for EURUSD in background (this will start mt5_bridge.py)...
+Starting mt5_order_executor.py in background...
+2025-10-14 02:14:00,236 - INFO - MT5 initialized successfully on account 0.
+2025-10-14 02:14:00,260 - INFO - Pika version 1.3.2 connecting to ('::1', 5672, 0, 0)
+2025-10-14 02:14:00,260 - INFO - Socket connected: <socket.socket fd=1004, family=23, type=1, proto=6, laddr=('::1', 55382, 0, 0), raddr=('::1', 5672, 0, 0)>
+2025-10-14 02:14:00,260 - INFO - Streaming transport linked up: (<pika.adapters.utils.io_services_utils._AsyncPlaintextTransport object at 0x0000013566DF5400>, _StreamingProtocolShim: <SelectConnection PROTOCOL transport=<pika.adapters.utils.io_services_utils._AsyncPlaintextTransport object at 0x0000013566DF5400> params=<ConnectionParameters host=localhost port=5672 virtual_host=/ ssl=False>>).
+2025-10-14 02:14:00,339 - INFO - AMQPConnector - reporting success: <SelectConnection OPEN transport=<pika.adapters.utils.io_services_utils._AsyncPlaintextTransport object at 0x0000013566DF5400> params=<ConnectionParameters host=localhost port=5672 virtual_host=/ ssl=False>>
+2025-10-14 02:14:00,350 - INFO - AMQPConnectionWorkflow - reporting success: <SelectConnection OPEN transport=<pika.adapters.utils.io_services_utils._AsyncPlaintextTransport object at 0x0000013566DF5400> params=<ConnectionParameters host=localhost port=5672 virtual_host=/ ssl=False>>
+2025-10-14 02:14:00,350 - INFO - Connection workflow succeeded: <SelectConnection OPEN transport=<pika.adapters.utils.io_services_utils._AsyncPlaintextTransport object at 0x0000013566DF5400> params=<ConnectionParameters host=localhost port=5672 virtual_host=/ ssl=False>>
+2025-10-14 02:14:00,350 - INFO - Created channel=1
+2025-10-14 02:14:00,371 - INFO - [*] Waiting for messages on queue 'trade_orders'. To exit press CTRL+C
+Starting bot trading session for EURUSD (and  if provided)...
+time="2025-10-14T02:14:02+01:00" level=warning msg="C:\\Users\\EXT-PC\\tbot\\docker-compose.yml: the attribute `version` is obsolete, it will be ignored, please remove it to avoid potential confusion"
+2025-10-14 02:14:17,937 - INFO - Pika version 1.3.2 connecting to ('::1', 5672, 0, 0)
+2025-10-14 02:14:17,937 - INFO - Socket connected: <socket.socket fd=628, family=23, type=1, proto=6, laddr=('::1', 55385, 0, 0), raddr=('::1', 5672, 0, 0)>
+2025-10-14 02:14:17,937 - INFO - Streaming transport linked up: (<pika.adapters.utils.io_services_utils._AsyncPlaintextTransport object at 0x000001759354F5C0>, _StreamingProtocolShim: <SelectConnection PROTOCOL transport=<pika.adapters.utils.io_services_utils._AsyncPlaintextTransport object at 0x000001759354F5C0> params=<ConnectionParameters host=localhost port=5672 virtual_host=/ ssl=False>>).
+2025-10-14 02:14:18,134 - INFO - AMQPConnector - reporting success: <SelectConnection OPEN transport=<pika.adapters.utils.io_services_utils._AsyncPlaintextTransport object at 0x000001759354F5C0> params=<ConnectionParameters host=localhost port=5672 virtual_host=/ ssl=False>>
+2025-10-14 02:14:18,134 - INFO - AMQPConnectionWorkflow - reporting success: <SelectConnection OPEN transport=<pika.adapters.utils.io_services_utils._AsyncPlaintextTransport object at 0x000001759354F5C0> params=<ConnectionParameters host=localhost port=5672 virtual_host=/ ssl=False>>
+2025-10-14 02:14:18,142 - INFO - Connection workflow succeeded: <SelectConnection OPEN transport=<pika.adapters.utils.io_services_utils._AsyncPlaintextTransport object at 0x000001759354F5C0> params=<ConnectionParameters host=localhost port=5672 virtual_host=/ ssl=False>>
+2025-10-14 02:14:18,144 - INFO - Created channel=1
+2025-10-14 02:14:18,196 - INFO - Watchdog connected to RabbitMQ and purged heartbeat queue.
+2025-10-14 02:14:19,487 - WARNING - Bridge script not running at startup. Attempting to start it.
+2025-10-14 02:14:19,487 - INFO - Attempting to restart script with command: python C:\Users\EXT-PC\tbot\mt5_bridge.py EURUSD
+2025-10-14 02:14:19,548 - INFO - Successfully started new bridge process with PID: 9956
+2025-10-14 02:14:19,558 - INFO - Bridge is alive and heartbeat is OK.
+2025-10-14 02:14:21,197 - INFO - Initializing MetaTrader 5...
+2025-10-14 02:14:21,216 - INFO - Connecting to account #95263781 on MetaQuotes-Demo...
+2025-10-14 02:14:21,216 - INFO - Successfully connected to MetaTrader 5.
+2025-10-14 02:14:21,216 - INFO - Connecting to RabbitMQ on host 'localhost'...
+2025-10-14 02:14:21,246 - INFO - Pika version 1.3.2 connecting to ('::1', 5672, 0, 0)
+2025-10-14 02:14:21,246 - INFO - Socket connected: <socket.socket fd=624, family=23, type=1, proto=6, laddr=('::1', 55389, 0, 0), raddr=('::1', 5672, 0, 0)>
+2025-10-14 02:14:21,246 - INFO - Streaming transport linked up: (<pika.adapters.utils.io_services_utils._AsyncPlaintextTransport object at 0x0000013E362DFFB0>, _StreamingProtocolShim: <SelectConnection PROTOCOL transport=<pika.adapters.utils.io_services_utils._AsyncPlaintextTransport object at 0x0000013E362DFFB0> params=<ConnectionParameters host=localhost port=5672 virtual_host=/ ssl=False>>).
+2025-10-14 02:14:21,476 - INFO - AMQPConnector - reporting success: <SelectConnection OPEN transport=<pika.adapters.utils.io_services_utils._AsyncPlaintextTransport object at 0x0000013E362DFFB0> params=<ConnectionParameters host=localhost port=5672 virtual_host=/ ssl=False>>
+2025-10-14 02:14:21,476 - INFO - AMQPConnectionWorkflow - reporting success: <SelectConnection OPEN transport=<pika.adapters.utils.io_services_utils._AsyncPlaintextTransport object at 0x0000013E362DFFB0> params=<ConnectionParameters host=localhost port=5672 virtual_host=/ ssl=False>>
+2025-10-14 02:14:21,484 - INFO - Connection workflow succeeded: <SelectConnection OPEN transport=<pika.adapters.utils.io_services_utils._AsyncPlaintextTransport object at 0x0000013E362DFFB0> params=<ConnectionParameters host=localhost port=5672 virtual_host=/ ssl=False>>
+2025-10-14 02:14:21,485 - INFO - Created channel=1
+2025-10-14 02:14:21,495 - INFO - Successfully connected to RabbitMQ.
+2025-10-14 02:14:21,495 - INFO - Connection to RabbitMQ successful. Publishing data for ['EURUSD'].
+2025-10-14 02:14:29,564 - INFO - Bridge is alive and heartbeat is OK.
+2025-10-14 02:14:36,523 - INFO - Published heartbeat.
+2025-10-14 02:14:39,573 - INFO - Heartbeat received. Bridge PID: 9956
+2025-10-14 02:14:39,573 - INFO - Bridge is alive and heartbeat is OK.
+2025-10-14 02:14:49,580 - INFO - Bridge is alive and heartbeat is OK.
+2025-10-14 02:14:51,543 - INFO - Published heartbeat.
+2025-10-14 02:14:59,584 - INFO - Heartbeat received. Bridge PID: 9956
+2025-10-14 02:14:59,584 - INFO - Bridge is alive and heartbeat is OK.
+2025-10-14 02:15:06,566 - INFO - Published heartbeat.
+2025-10-14 02:15:09,697 - INFO - Heartbeat received. Bridge PID: 9956
+2025-10-14 02:15:09,697 - INFO - Bridge is alive and heartbeat is OK.
+2025-10-14 02:15:19,708 - INFO - Bridge is alive and heartbeat is OK.
+2025-10-14 02:15:21,588 - INFO - Published heartbeat.
+2025-10-14 02:15:29,719 - INFO - Heartbeat received. Bridge PID: 9956
+2025-10-14 02:15:29,719 - INFO - Bridge is alive and heartbeat is OK.
+2025-10-14 02:15:36,611 - INFO - Published heartbeat.
+2025-10-14 02:15:39,724 - INFO - Heartbeat received. Bridge PID: 9956
+2025-10-14 02:15:39,724 - INFO - Bridge is alive and heartbeat is OK.
+2025-10-14 02:15:49,732 - INFO - Bridge is alive and heartbeat is OK.
+2025-10-14 02:15:51,633 - INFO - Published heartbeat.
+2025-10-14 02:15:59,743 - INFO - Heartbeat received. Bridge PID: 9956
+2025-10-14 02:15:59,747 - INFO - Bridge is alive and heartbeat is OK.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,296 @@
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify
+import os
+import threading
+import json
+from security_utils import decrypt_message, get_encryption_key
+from publisher import Publisher
+from consumer import Consumer
+from influx_connector import InfluxDBConnector
+from postgresql_client import PostgreSQLConnector
+from economic_calendar import get_economic_events
+
+app = Flask(__name__)
+app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev_secret_key_for_testing_only")
+
+# Global dictionary to hold the latest market data for each symbol
+latest_market_data = {}
+
+# --- Securely Load Configuration ---
+try:
+    encryption_key = get_encryption_key()
+
+    # RabbitMQ Configuration
+    BROKER_HOST = os.getenv("BROKER_HOST", "rabbitmq")
+    BROKER_PORT = int(os.getenv("BROKER_PORT", 5672))
+    BROKER_USER = decrypt_message(os.getenv("ENCRYPTED_BROKER_USER").encode(), encryption_key)
+    BROKER_PASS = decrypt_message(os.getenv("ENCRYPTED_BROKER_PASS").encode(), encryption_key)
+
+    # InfluxDB Configuration
+    INFLUXDB_URL = os.getenv("INFLUXDB_URL", "http://influxdb:8086")
+    INFLUXDB_TOKEN = decrypt_message(os.getenv("ENCRYPTED_INFLUXDB_TOKEN").encode(), encryption_key)
+    INFLUXDB_ORG = os.getenv("INFLUXDB_ORG", "-")
+    INFLUXDB_BUCKET = os.getenv("INFLUXDB_BUCKET", "mt5_market_data")
+
+    # PostgreSQL Configuration
+    PG_DBNAME = os.getenv("PG_DBNAME", "mt5_trade_records")
+    PG_USER = os.getenv("POSTGRES_USER")
+    PG_PASSWORD = os.getenv("POSTGRES_PASSWORD")
+    PG_HOST = os.getenv("PG_HOST", "postgresql")
+    PG_PORT = os.getenv("PG_PORT", "5432")
+
+except (ValueError, TypeError, AttributeError) as e:
+    # This will catch errors if env vars are not set or decryption fails
+    # In a real app, you might want to log this and exit gracefully
+    print(f"FATAL: Could not load or decrypt configuration. Error: {e}")
+    # For simplicity in this context, we'll allow the app to continue
+    # but it will likely fail on subsequent operations.
+    pass
+
+# --- Market Data Consumer Thread ---
+class MarketDataConsumer(Consumer):
+    def __init__(self, broker_host, broker_port, broker_user, broker_pass, queue_name='market_data_queue'):
+        super().__init__(broker_host, broker_port, broker_user, broker_pass, queue_name)
+        self.daemon = True # Allow main program to exit even if thread is still running
+
+    def on_message_callback(self, ch, method, properties, body):
+        global latest_market_data
+        try:
+            data = json.loads(body.decode('utf-8'))
+            symbol = data.get('symbol')
+            if symbol:
+                latest_market_data[symbol] = data
+                # print(f"Received and updated market data for {symbol}: {data.get('bid')}/{data.get('ask')}") # For debugging
+        except json.JSONDecodeError as e:
+            print(f"Error decoding JSON from RabbitMQ: {e}")
+        except Exception as e:
+            print(f"Error processing market data message: {e}")
+
+market_data_consumer_thread = None
+
+def start_market_data_consumer():
+    global market_data_consumer_thread
+    if market_data_consumer_thread is None:
+        try:
+            consumer = MarketDataConsumer(BROKER_HOST, BROKER_PORT, BROKER_USER, BROKER_PASS)
+            market_data_consumer_thread = threading.Thread(target=consumer.start_consuming, args=('market_data_queue',))
+            market_data_consumer_thread.daemon = True
+            market_data_consumer_thread.start()
+            print("Market data consumer thread started.")
+        except Exception as e:
+            print(f"Failed to start market data consumer thread: {e}")
+
+# Call this function when the app starts
+with app.app_context():
+    start_market_data_consumer()
+
+# Dummy user data for demonstration
+USERS = {
+    "admin": "adminpass",
+    "user": "userpass"
+}
+
+@app.route('/')
+def index():
+    if 'username' not in session:
+        return redirect(url_for('login'))
+    return render_template('index.html', username=session['username'])
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+        if username in USERS and USERS[username] == password:
+            session['username'] = username
+            return redirect(url_for('index'))
+        else:
+            return render_template('login.html', error="Invalid credentials")
+    return render_template('login.html')
+
+@app.route('/logout')
+def logout():
+    session.pop('username', None)
+    return redirect(url_for('index'))
+
+@app.route('/status')
+def status_page():
+    if 'username' not in session:
+        return redirect(url_for('login'))
+    
+    status_info = {}
+
+    # Check RabbitMQ connection
+    try:
+        publisher = Publisher(BROKER_HOST, BROKER_PORT, BROKER_USER, BROKER_PASS)
+        publisher.connect()
+        status_info['rabbitmq'] = "Connected"
+        publisher.close()
+    except Exception as e:
+        status_info['rabbitmq'] = f"Connection failed"
+
+    # Check InfluxDB connection
+    try:
+        influx_connector = InfluxDBConnector(url=INFLUXDB_URL, token=INFLUXDB_TOKEN, org=INFLUXDB_ORG, bucket=INFLUXDB_BUCKET)
+        influx_connector.write_data(measurement="web_status_check", tags={"service": "web"}, fields={"status": 1})
+        status_info['influxdb'] = "Connected"
+        influx_connector.close()
+    except Exception as e:
+        status_info['influxdb'] = f"Connection failed"
+
+    # Check PostgreSQL connection
+    try:
+        pg_connector = PostgreSQLConnector(
+            dbname=PG_DBNAME,
+            user=PG_USER,
+            password=PG_PASSWORD,
+            host=PG_HOST,
+            port=PG_PORT
+        )
+        pg_connector.connect()
+        if pg_connector.conn:
+            status_info['postgresql'] = "Connected"
+            pg_connector.close()
+        else:
+            status_info['postgresql'] = "Connection failed"
+    except Exception as e:
+        status_info['postgresql'] = f"Connection failed"
+        
+    return render_template('status.html', username=session['username'], status=status_info)
+
+@app.route('/api/status')
+def api_status():
+    if 'username' not in session:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    status_info = {}
+
+    # Check RabbitMQ connection
+    try:
+        publisher = Publisher(BROKER_HOST, BROKER_PORT, BROKER_USER, BROKER_PASS)
+        publisher.connect()
+        status_info['rabbitmq'] = "Connected"
+        publisher.close()
+    except Exception as e:
+        status_info['rabbitmq'] = f"Connection failed"
+
+    # Check InfluxDB connection
+    try:
+        influx_connector = InfluxDBConnector(url=INFLUXDB_URL, token=INFLUXDB_TOKEN, org=INFLUXDB_ORG, bucket=INFLUXDB_BUCKET)
+        influx_connector.write_data(measurement="web_status_check", tags={"service": "web"}, fields={"status": 1})
+        status_info['influxdb'] = "Connected"
+        influx_connector.close()
+    except Exception as e:
+        status_info['influxdb'] = f"Connection failed"
+
+    # Check PostgreSQL connection
+    try:
+        pg_connector = PostgreSQLConnector(
+            dbname=PG_DBNAME,
+            user=PG_USER,
+            password=PG_PASSWORD,
+            host=PG_HOST,
+            port=PG_PORT
+        )
+        pg_connector.connect()
+        if pg_connector.conn:
+            status_info['postgresql'] = "Connected"
+            pg_connector.close()
+        else:
+            status_info['postgresql'] = "Connection failed"
+    except Exception as e:
+        status_info['postgresql'] = f"Connection failed"
+
+    return jsonify(status_info)
+
+@app.route('/api/economic-events')
+def api_economic_events():
+    if 'username' not in session:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    try:
+        events_df = get_economic_events(days_ahead=7)
+        if not events_df.empty:
+            high_impact_df = events_df[events_df['importance'] == 'high'].copy()
+            # Convert dataframe to a list of dicts for JSON serialization
+            high_impact_df['time'] = high_impact_df['time'].astype(str)
+            events_json = high_impact_df.to_dict(orient='records')
+            return jsonify(events_json)
+        else:
+            return jsonify([])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/live-market-data/<symbol>')
+def api_live_market_data(symbol):
+    if 'username' not in session:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    data = latest_market_data.get(symbol.upper())
+    if data:
+        return jsonify(data)
+    else:
+        return jsonify({"error": "Market data not found for symbol", "symbol": symbol}), 404
+
+@app.route('/api/open-positions')
+def api_open_positions():
+    if 'username' not in session:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    try:
+        pg_connector = PostgreSQLConnector(
+            dbname=PG_DBNAME,
+            user=PG_USER,
+            password=PG_PASSWORD,
+            host=PG_HOST,
+            port=PG_PORT
+        )
+        pg_connector.connect()
+        # Assuming a 'trades' table with a 'status' column indicating 'open' or 'closed'
+        # Adjust query based on your actual schema
+        query = "SELECT * FROM trades WHERE status = 'open'"
+        open_positions = pg_connector.fetch_all(query)
+        pg_connector.close()
+        
+        # Convert list of tuples to list of dictionaries for better JSON representation
+        # Assuming column names are known or can be fetched from cursor.description
+        if open_positions:
+            # This is a simplified way; a more robust solution would map columns dynamically
+            # For now, let's assume a fixed structure or fetch column names
+            # Example: (id, symbol, type, volume, entry_price, current_price, status, ...) 
+            # For demonstration, let's just return the raw tuples for now, 
+            # or we can define a simple mapping if the schema is fixed.
+            # Let's assume a simple schema for now for demonstration purposes.
+            # If the schema is dynamic, we'd need to fetch cursor.description
+            columns = ["id", "symbol", "type", "volume", "entry_price", "current_price", "status", "take_profit", "stop_loss", "timestamp"]
+            positions_dicts = []
+            for pos in open_positions:
+                positions_dicts.append(dict(zip(columns, pos)))
+            return jsonify(positions_dicts)
+        else:
+            return jsonify([])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/send_message', methods=['GET', 'POST'])
+def send_message():
+    if 'username' not in session:
+        return redirect(url_for('login'))
+
+    message_status = None
+    if request.method == 'POST':
+        message = request.form['message']
+        try:
+            publisher = Publisher(BROKER_HOST, BROKER_PORT, BROKER_USER, BROKER_PASS)
+            publisher.connect()
+            publisher.publish_message("web_queue", message)
+            message_status = "Message sent successfully!"
+            publisher.close()
+        except Exception as e:
+            message_status = f"Failed to send message: {e}"
+
+    return render_template('send_message.html', message_status=message_status, username=session['username'])
+
+
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)

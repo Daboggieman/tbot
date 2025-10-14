@@ -1,0 +1,130 @@
+version: "3.8"
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    hostname: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672" # Management UI
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - backend_network
+    restart: unless-stopped
+
+  influxdb:
+    image: influxdb:1.8
+    hostname: influxdb
+    ports:
+      - "8086:8086"
+    volumes:
+      - influxdb_data:/var/lib/influxdb
+    environment:
+      INFLUXDB_DB: mt5_market_data
+      INFLUXDB_HTTP_FLUX_ENABLED: "true"
+    networks:
+      - backend_network
+    restart: unless-stopped
+
+  postgresql:
+    image: postgres:13
+    hostname: postgresql
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgresql_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: mt5_trade_records
+      POSTGRES_USER: "95263781"
+      POSTGRES_PASSWORD: "InL!VoW3"
+    networks:
+      - backend_network
+    restart: unless-stopped
+
+  postgres_exporter:
+    image: wrouesnel/postgres_exporter:latest
+    hostname: postgres_exporter
+    environment:
+      DATA_SOURCE_NAME: "postgresql://95263781:InL!VoW3@postgresql:5432/mt5_trade_records?sslmode=disable"
+    ports:
+      - "9187:9187"
+    networks:
+      - backend_network
+    restart: unless-stopped
+    depends_on:
+      - postgresql
+
+  bot:
+    build: ./bot
+    hostname: mt5_bot
+    dns:
+      - 8.8.8.8
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - rabbitmq
+      - influxdb
+      - postgresql
+    command: python main.py start-web
+    volumes:
+      - ./bot:/app # Mount the bot directory into the container's /app folder
+    ports:
+      - "5000:5000"
+#      - "8000:8000" # Prometheus metrics port
+    environment:
+      ENCRYPTION_KEY: "jDvau9_2I9zMEPpm-wdYPvBWfIxqUQyGFnEProcaQ-g="
+      ENCRYPTED_BROKER_USER: "gAAAAABonJ3Ss6l39bIASjFwxTfVbgdcTBKvkcvwmQN1taFR40qzYfKxfzSOhfAMXBrtnTegqtHVP6RqZcxxi7kcyCSX5rYe-A=="
+      ENCRYPTED_BROKER_PASS: "gAAAAABonJ8BYK9zHfWeiutwing-tp8ZUVyOr_A1Jn957DqQKas3JusbKcdtso4Ji8t7NagFXyIRLdGZIg9mUxcnFe2Z0cEipg=="
+      ENCRYPTED_INFLUXDB_TOKEN: "gAAAAABonJ-7K5b7KUj6Ym8XoXKNZdBorQ7GcOtJ1i1a8cDGesHq3Gx3VuJyo4sYTYZz6LpIH3-9_9Ce5HIxefcwZC7au7NjCw=="
+      POSTGRES_USER: "95263781"
+      POSTGRES_PASSWORD: "InL!VoW3"
+      ALPHA_VANTAGE_API_KEY: "HDBR1V1QZ0PA82U8"
+      ENCRYPTED_MT5_ACCOUNT: "gAAAAABo1cq3dZc49lEgavtF213-5MhMIWswxHR6hDhkIFWTHy4nDZ-c83fednqzKBaXimABt95sfF2qsg8BBI_BHkis9B_l6g=="
+      ENCRYPTED_MT5_PASSWORD: "gAAAAABo1cq3N2v8K5BJsjcoFK6o822han6E2K7vOCDkcLZwpw4oZ8iEdz-P2Zs9mUDWgYTVNkSQbEbd1fTLWHVXkwNMSF9LLg=="
+      MT5_SERVER: "MetaQuotes-Demo"
+      BROKER_HOST: "rabbitmq"
+    
+    networks:
+      - backend_network
+    restart: unless-stopped
+
+#  prometheus:
+#    image: prom/prometheus:latest
+#    hostname: prometheus
+#    ports:
+#      - "9090:9090"
+#    volumes:
+#      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+#      - prometheus_data:/prometheus
+#    command: --config.file=/etc/prometheus/prometheus.yml --web.enable-remote-write-receiver --web.enable-lifecycle
+#    networks:
+#      - monitoring_network
+#      - bot_network
+#    restart: unless-stopped
+
+#  grafana:
+#    image: grafana/grafana:latest
+#    hostname: grafana
+#    ports:
+#      - "3000:3000"
+#    volumes:
+#      - grafana_data:/var/lib/grafana
+#    networks:
+#      - monitoring_network
+#    restart: unless-stopped
+
+networks:
+  backend_network:
+    driver: bridge
+  bot_network:
+    driver: bridge
+#  monitoring_network:
+#    driver: bridge
+
+volumes:
+  rabbitmq_data:
+  influxdb_data:
+  postgresql_data:
+#  prometheus_data:
+#  grafana_data:

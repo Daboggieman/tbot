@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+    <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+        <h1 class="h2">Dashboard</h1>
+    </div>
+
+    <div class="row">
+        <!-- System Status Card -->
+        <div class="col-md-6 mb-4">
+            <div class="card">
+                <div class="card-header">
+                    System Status
+                </div>
+                <ul class="list-group list-group-flush" id="system-status-list">
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        RabbitMQ
+                        <span id="status-rabbitmq"><span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span></span>
+                    </li>
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        InfluxDB
+                        <span id="status-influxdb"><span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span></span>
+                    </li>
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        PostgreSQL
+                        <span id="status-postgresql"><span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span></span>
+                    </li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Economic Events Card -->
+        <div class="col-md-6 mb-4">
+            <div class="card">
+                <div class="card-header">
+                    Upcoming High-Impact Events (Next 7 Days)
+                </div>
+                <div class="card-body">
+                    <div id="economic-events-list"><span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Loading events...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- Live Market Data Card -->
+        <div class="col-md-6 mb-4">
+            <div class="card">
+                <div class="card-header">
+                    Live Market Data
+                </div>
+                <div class="card-body">
+                    <div id="live-market-data-list">
+                        <p class="text-muted">Loading market data...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Open Positions Card -->
+        <div class="col-md-6 mb-4">
+            <div class="card">
+                <div class="card-header">
+                    Open Positions
+                </div>
+                <div class="card-body">
+                    <div id="open-positions-list">
+                        <p class="text-muted">Loading open positions...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+
+    // --- Configuration ---
+    const SYMBOLS_TO_MONITOR = ['EURUSD', 'XAUUSD', 'GOOG', 'AAPL']; // Customize symbols here
+
+    function updateStatus() {
+        fetch('/api/status')
+            .then(response => response.json())
+            .then(data => {
+                updateBadge('status-rabbitmq', data.rabbitmq);
+                updateBadge('status-influxdb', data.influxdb);
+                updateBadge('status-postgresql', data.postgresql);
+            })
+            .catch(error => console.error('Error fetching status:', error));
+    }
+
+    function updateBadge(elementId, status) {
+        const element = document.getElementById(elementId);
+        if (status === 'Connected') {
+            element.innerHTML = `<span class="badge bg-success">Connected</span>`;
+        } else {
+            element.innerHTML = `<span class="badge bg-danger">Failed</span>`;
+        }
+    }
+
+    function updateEvents() {
+        fetch('/api/economic-events')
+            .then(response => response.json())
+            .then(data => {
+                const listElement = document.getElementById('economic-events-list');
+                if (data.error) {
+                    listElement.innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
+                    return;
+                }
+                if (data.length === 0) {
+                    listElement.innerHTML = `<p class="text-muted">No high-impact events found.</p>`;
+                    return;
+                }
+
+                let html = '<ul class="list-group list-group-flush">'
+                data.forEach(event => {
+                    html += `<li class="list-group-item"><strong>${event.date} ${event.time}</strong> [${event.currency}] ${event.event}</li>`;
+                });
+                html += '</ul>';
+                listElement.innerHTML = html;
+            })
+            .catch(error => console.error('Error fetching events:', error));
+    }
+
+    function updateLiveMarketData() {
+        const marketDataListElement = document.getElementById('live-market-data-list');
+        let html = '<ul class="list-group list-group-flush">';
+        let promises = SYMBOLS_TO_MONITOR.map(symbol =>
+            fetch(`/api/live-market-data/${symbol}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        return `<li class="list-group-item text-danger">${symbol}: ${data.error}</li>`;
+                    } else {
+                        return `<li class="list-group-item"><strong>${data.symbol}</strong>: Bid ${data.bid}, Ask ${data.ask}, Spread ${data.spread}</li>`;
+                    }
+                })
+                .catch(error => `<li class="list-group-item text-danger">${symbol}: Error fetching data</li>`)
+        );
+
+        Promise.all(promises).then(results => {
+            html += results.join('');
+            html += '</ul>';
+            marketDataListElement.innerHTML = html;
+        });
+    }
+
+    function updateOpenPositions() {
+        fetch('/api/open-positions')
+            .then(response => response.json())
+            .then(data => {
+                const openPositionsListElement = document.getElementById('open-positions-list');
+                if (data.error) {
+                    openPositionsListElement.innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
+                    return;
+                }
+                if (data.length === 0) {
+                    openPositionsListElement.innerHTML = `<p class="text-muted">No open positions.</p>`;
+                    return;
+                }
+
+                let html = '<table class="table table-striped table-sm"><thead><tr><th>ID</th><th>Symbol</th><th>Type</th><th>Volume</th><th>Entry Price</th><th>Current Price</th><th>P/L</th></tr></thead><tbody>';
+                data.forEach(position => {
+                    // Assuming 'current_price' is available and 'entry_price' is from the position
+                    const pnl = (position.current_price - position.entry_price) * position.volume * (position.type === 'BUY' ? 1 : -1);
+                    const pnlClass = pnl >= 0 ? 'text-success' : 'text-danger';
+                    html += `<tr>
+                                <td>${position.id}</td>
+                                <td>${position.symbol}</td>
+                                <td>${position.type}</td>
+                                <td>${position.volume}</td>
+                                <td>${position.entry_price}</td>
+                                <td>${position.current_price ? position.current_price.toFixed(5) : 'N/A'}</td>
+                                <td class="${pnlClass}">${pnl.toFixed(2)}</td>
+                             </tr>`;
+                });
+                html += '</tbody></table>';
+                openPositionsListElement.innerHTML = html;
+            })
+            .catch(error => console.error('Error fetching open positions:', error));
+    }
+
+    // Initial update
+    updateStatus();
+    updateEvents();
+    updateLiveMarketData();
+    updateOpenPositions();
+
+    // Periodic update every 5 seconds for market data and positions, 15 for status/events
+    setInterval(updateStatus, 15000);
+    setInterval(updateEvents, 15000);
+    setInterval(updateLiveMarketData, 5000);
+    setInterval(updateOpenPositions, 5000);
+});
+</script>
+{% endblock %}

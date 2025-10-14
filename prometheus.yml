@@ -1,0 +1,23 @@
+global:
+  scrape_interval: 15s # By default, scrape targets every 15 seconds.
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'rabbitmq'
+    static_configs:
+      - targets: ['rabbitmq:15692'] # RabbitMQ Prometheus plugin port
+
+  - job_name: 'influxdb'
+    static_configs:
+      - targets: ['influxdb:8086'] # InfluxDB HTTP API for metrics
+
+  - job_name: 'postgresql'
+    static_configs:
+      - targets: ['postgres_exporter:9187'] # postgres_exporter default port
+
+  - job_name: 'bot_app'
+    static_configs:
+      - targets: ['mt5_bot:8000'] # Metrics exposed by the bot application

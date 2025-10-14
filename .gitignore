@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python/
+env/
+venv/
+.venv/
+*.egg-info/
+.tox/
+.coverage
+.pytest_cache/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Docker
+*.swp
+.dockerignore
+.docker/
+# docker-compose.override.yml # If used for local overrides
+
+# Environment variables
+# .env
+
+# Logs
+*.log
+logs/
+
+# Historical Data
+bot/historical_data/*.csv
+
+# IDEs
+.vscode/
+
+# Gemini-specific ignores
+.gemini/
+.geminiignore
