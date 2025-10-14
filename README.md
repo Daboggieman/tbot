@@ -24,38 +24,48 @@ This bot is equipped with a wide range of professional-grade features:
 
 ### Technical Foundation
 
+- **Programming Language**: Developed primarily in Python.
 - **Containerized Environment**: All core services (bot logic, databases, message queue) are containerized with Docker for consistent and reproducible deployments.
 - **Modular Architecture**: The code is separated into distinct modules for data management, strategies, execution, analytics, and more, allowing for easy extension.
+- **Database Integration**: Utilizes InfluxDB for high-performance time-series data storage (market ticks, metrics) and PostgreSQL for structured data (trade records, configurations).
+- **User Interface**: Features a Command Line Interface (CLI) for direct interaction and a basic Flask web interface for monitoring.
 - **Secure Configuration**: All sensitive credentials (broker details, API keys) are encrypted and managed via environment variables.
 
 ### Redundancy & Reliability
 
+- **Comprehensive Logging**: A robust logging system ensures all critical operations, errors, and warnings are recorded for monitoring and debugging.
 - **Resilient Connections**: All connections to external services (PostgreSQL, InfluxDB, RabbitMQ) are wrapped in a custom retry decorator (`@retry_with_backoff`) that handles connection failures with exponential backoff and jitter, preventing crashes due to transient network issues.
 - **Persistent Consumer**: The core `Consumer` that processes market data is built within a resilient loop. If the connection to the RabbitMQ broker is lost, it will automatically and indefinitely attempt to reconnect without crashing the bot.
 - **Data Feed Watchdog**: A standalone `mt5_watchdog.py` script runs on the host machine to monitor the critical `mt5_bridge.py` process. It listens for a heartbeat and checks the process status, automatically restarting the bridge if it fails.
 
 ### Market Analysis & Context
 
-- **Live MT5 Integration**: Connects directly to a live MT5 terminal for both real-time tick data and for downloading historical data for backtesting.
-- **News & Sentiment Analysis**: Integrates with a news API to fetch financial news for specified symbols and performs sentiment analysis. This sentiment score can be used by strategies to make more informed decisions.
-- **Economic Calendar Awareness**: The bot fetches a calendar of high-impact economic events. It can be configured to automatically pause trading during a quiet period before and after these events to avoid extreme volatility.
-- **Intermarket Analysis**: Strategies can be configured to use data from a secondary symbol (e.g., a market index or a correlated asset) to provide additional context for trading signals.
+- **Live MT5 Integration**: Connects directly to a live MT5 terminal for real-time tick data via `mt5_bridge.py` and for downloading historical data for backtesting via `historical_data_importer.py`.
+- **Advanced News & Sentiment Analysis**: Integrates with Alpha Vantage API to fetch financial news and provides pre-calculated sentiment scores. Strategies can leverage this sentiment for more informed decisions.
+- **Economic Calendar Awareness**: Fetches high-impact economic events and can pause trading during configurable quiet periods around these events to mitigate volatility risks.
+- **Intermarket Analysis**: Utilizes a `MarketContextAnalyzer` to calculate correlation matrices and indices between symbols, providing deeper insights into market relationships. Strategies can dynamically adapt based on these intermarket correlations.
+- **Enhanced Signal Detection**: Incorporates multi-factor signal strength scoring, market regime detection (Trending, Ranging, Volatile), and seasonality-aware signal generation for more nuanced trading decisions.
+- **Asset-Specific Customization**: Supports customized instrument profiles and liquidity-based adjustments to position sizing, tailoring trading to individual asset characteristics.
 
 ### Order Execution & Management
 
 - **Smart Order Types**: Supports standard `Market`, `Limit`, and `Stop` orders, as well as advanced algorithmic orders like `TWAP` (Time-Weighted Average Price) and `VWAP` (Volume-Weighted Average Price).
-- **Advanced Trade Management**: Provides functionality for complex trade actions, including partial exits and programmatic trailing stops.
+- **Direct MT5 Trade Execution Bridge**: A dedicated `mt5_order_executor.py` script running on the host subscribes to a RabbitMQ queue, receiving trade orders from the bot and executing them directly in the MT5 terminal.
+- **Advanced Trade Management**: The `OrderManager` handles the full trade lifecycle, including position sizing, risk checks, partial exits, and programmatic trailing stops.
 
 ### Risk Management
 
 - **Dynamic Position Sizing**: Automatically calculates trade volume based on account balance, risk percentage, and market volatility (e.g., using ATR).
-- **Drawdown Protection**: Includes logic to monitor account equity and enforce rules against daily and total drawdown limits.
+- **Comprehensive Risk Controls**: Implements robust drawdown protection mechanisms and overall risk management strategies to safeguard capital.
+- **Profit Management**: Manages profit targets for open positions, including trailing profit targets, to lock in gains.
 - **Pre-Trade Compliance**: A `ComplianceManager` module checks every proposed trade against a set of user-defined rules (e.g., max volume, restricted symbols) before execution.
 
 ### Strategy Development & Evaluation
 
 - **Backtesting Engine**: A powerful engine supports both vectorized (fast, for simple strategies) and event-driven (slower, for complex logic) backtesting.
 - **Strategy Optimization**: Includes an optimization suite to run a strategy with multiple parameter combinations and find the best-performing set.
+- **Automated Self-Optimization**: Implements walk-forward optimization to periodically re-optimize strategy parameters using recent market data, ensuring strategies adapt to changing market conditions.
+- **Automated Performance Review**: Analyzes trading history, calculates key performance metrics, and can automatically disable underperforming strategies.
 - **Performance Analytics**: After a backtest, the system can generate a detailed performance report, including metrics like Sharpe ratio, Sortino ratio, max drawdown, and more.
 - **Visualization**: Can plot the equity curve from a backtest to visually assess performance.
 
