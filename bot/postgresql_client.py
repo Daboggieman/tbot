@@ -86,6 +86,17 @@ class PostgreSQLConnector:
             logger.error(f"Error fetching data from {table_name}: {e}")
             return []
 
+    def execute_update(self, query, params):
+        """Executes an update query (e.g., UPDATE, DELETE)."""
+        try:
+            self._ensure_connection()
+            with self.conn.cursor() as cur:
+                cur.execute(query, params)
+                self.conn.commit()
+                logger.info(f"Successfully executed update query. {cur.rowcount} rows affected.")
+        except (psycopg2.Error, ConnectionError) as e:
+            logger.error(f"Error executing update query: {e}")
+
     def close(self):
         if self.conn and not self.conn.closed:
             self.conn.close()

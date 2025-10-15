@@ -17,9 +17,10 @@ from signal_scorer import SignalScorer
 from thematic_analyzer import ThematicAnalyzer
 from strategy_selector import StrategySelector
 from historical_data_manager import HistoricalDataManager
+from technical_indicators import calculate_atr
 
 class Consumer:
-    def __init__(self, host, port, username, password, symbol, secondary_symbol=None, correlation_window_minutes=60, quiet_period_minutes=30, candle_interval_minutes=1, default_volume=0.1, default_sl_points=50, default_tp_points=100, default_slippage=5, trailing_stop_pips=20):
+    def __init__(self, host, port, username, password, symbol, secondary_symbol=None, correlation_window_minutes=60, quiet_period_before_minutes=30, quiet_period_after_minutes=5, candle_interval_minutes=1, default_volume=0.1, default_sl_points=50, default_tp_points=100, default_slippage=5, trailing_stop_pips=20):
         self.host = host
         self.port = port
         self.username = username
@@ -47,7 +48,8 @@ class Consumer:
         self.last_news_fetch_time = None
         self.news_fetch_interval = timedelta(minutes=15)
         
-        self.quiet_period = timedelta(minutes=quiet_period_minutes)
+        self.quiet_period_before = timedelta(minutes=quiet_period_before_minutes)
+        self.quiet_period_after = timedelta(minutes=quiet_period_after_minutes)
         self.high_impact_events = []
 
         self.current_candle = None
@@ -184,10 +186,10 @@ class Consumer:
             logging.error(f"An error occurred while loading economic events: {e}")
 
     def _is_in_quiet_period(self):
-        """Checks if the current time is within a quiet period around a high-impact event."""
+        """Checks if the current time is within an asymmetrical quiet period around a high-impact event."""
         now_utc = datetime.now(timezone.utc)
         for event_time in self.high_impact_events:
-            if (event_time - self.quiet_period) <= now_utc <= (event_time + self.quiet_period):
+            if (event_time - self.quiet_period_before) <= now_utc <= (event_time + self.quiet_period_after):
                 logging.warning(f"Trading paused. In quiet period for high-impact event at {event_time}.")
                 return True
         return False
@@ -363,8 +365,65 @@ class Consumer:
 
                 if confidence_score > self.confidence_threshold:
                     logging.info(f"Confidence score {confidence_score} exceeds threshold ({self.confidence_threshold}). Placing trade.")
+                    
+                    # Dynamically calculate volume based on confidence score
+                    min_volume = self.default_volume / 2
+                    max_volume = self.default_volume * 1.5
+                    
+                    # Scale the confidence score from its threshold-based range to a 0-1 range
+                    confidence_range = 100 - self.confidence_threshold
+                    score_in_range = confidence_score - self.confidence_threshold
+                    scaling_factor = score_in_range / confidence_range if confidence_range > 0 else 1.0
+                    
+                    # Apply the scaling factor to the volume range
+                    volume_confidence_scaled = min_volume + (scaling_factor * (max_volume - min_volume))
+
+                    # --- Volatility Adjustment (ATR) ---
+                    # TODO: Make TARGET_ATR_NORMAL dynamic based on historical volatility
+                    TARGET_ATR_NORMAL = 0.0001 # Example for EURUSD M1
+                    current_atr = calculate_atr(market_data_df.rename(columns={'timestamp': 'Timestamp', 'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close'}))
+                    
+                    if current_atr > 0:
+                        atr_adjustment_factor = TARGET_ATR_NORMAL / current_atr
+                        # Cap the adjustment factor to prevent extreme sizes (e.g., 0.5x to 2x)
+                        atr_adjustment_factor = max(0.5, min(2.0, atr_adjustment_factor))
+                        final_volume = volume_confidence_scaled * atr_adjustment_factor
+                        logging.info(f"Volume adjusted for volatility. ATR: {current_atr:.5f}, Factor: {atr_adjustment_factor:.2f}, New Volume: {final_volume:.2f}")
+                    else:
+                        final_volume = volume_confidence_scaled
+                        logging.warning("Could not calculate ATR. Using confidence-scaled volume without volatility adjustment.")
+
+                    volume = round(final_volume, 2) # Round to a typical lot size precision
+
+                    # --- Correlation Adjustment ---
+                    open_positions = self.order_manager.get_open_positions()
+                    if open_positions and self.market_analyzer:
+                        new_symbol = tick_data.get('symbol')
+                        open_symbols = list(set(pos['symbol'] for pos in open_positions.values()))
+                        
+                        correlations = []
+                        for open_symbol in open_symbols:
+                            if new_symbol != open_symbol:
+                                correlation = self.market_analyzer.get_correlation(new_symbol, open_symbol)
+                                if correlation is not None:
+                                    correlations.append(correlation)
+                        
+                        if correlations:
+                            avg_correlation = sum(correlations) / len(correlations)
+                            correlation_adjustment_factor = 1.0
+                            # Reduce size if new trade is strongly correlated with existing portfolio
+                            if avg_correlation > 0.7:
+                                correlation_adjustment_factor = 0.5 # Halve the size
+                            elif avg_correlation > 0.5:
+                                correlation_adjustment_factor = 0.75 # Reduce by 25%
+                            
+                            if correlation_adjustment_factor < 1.0:
+                                volume = volume * correlation_adjustment_factor
+                                logging.info(f"Volume adjusted for portfolio correlation. Avg Corr: {avg_correlation:.2f}, Factor: {correlation_adjustment_factor:.2f}, Final Volume: {volume:.2f}")
+
+                    logging.info(f"Dynamic volume calculated: {volume} (Base: {self.default_volume}, Confidence: {confidence_score})")
+
                     symbol = tick_data.get('symbol')
-                    volume = self.default_volume
                     points_sl = self.default_sl_points
                     points_tp = self.default_tp_points
                     slippage = self.default_slippage

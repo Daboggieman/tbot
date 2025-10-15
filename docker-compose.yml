@@ -84,6 +84,9 @@ services:
       ENCRYPTED_MT5_PASSWORD: "gAAAAABo1cq3N2v8K5BJsjcoFK6o822han6E2K7vOCDkcLZwpw4oZ8iEdz-P2Zs9mUDWgYTVNkSQbEbd1fTLWHVXkwNMSF9LLg=="
       MT5_SERVER: "MetaQuotes-Demo"
       BROKER_HOST: "rabbitmq"
+      PG_DBNAME: "mt5_trade_records"
+      PG_HOST: "postgresql"
+      PG_PORT: "5432"
     
     networks:
       - backend_network

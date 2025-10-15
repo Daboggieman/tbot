@@ -432,3 +432,51 @@ This roadmap outlines the evolution from a strategy-driven bot to a fully autono
 **Next Step:**
 
 - The system is currently stable. Ready for the next task.
+
+
+---
+
+**SESSION COMPLETE: 2025-10-15**
+
+**Goal:** Test Automated Trade Lifecycle Management.
+
+**Summary:**
+This was a marathon debugging and refactoring session. The initial goal was to place a manual trade and verify that the bot's consumer process would manage its lifecycle (SL, TP, trailing stops). We discovered a series of deep architectural issues and bugs that prevented this, and we systematically fixed them all.
+
+**Bugs Fixed & Refactors:**
+
+1.  **CLI Argument Mismatch:** The `market-order` command was being called with an incorrect number of arguments. 
+    - **Fix:** Corrected the command to match the script's definition.
+
+2.  **Parameter Jumbling:** The arguments to the `place_market_order` function were in the wrong order, causing data corruption in the message sent to the executor.
+    - **Fix:** Refactored the function signature in `order_manager.py` and the corresponding call in `main.py` to be logical and correct, which also involved adding the missing `order_type`.
+
+3.  **`NameError` in OrderManager:** A missed variable rename (`price` vs `requested_price`) caused a crash after placing an order.
+    - **Fix:** Corrected the variable name.
+
+4.  **Invalid Trade Parameters:** The MT5 terminal was rejecting orders because the hardcoded price and SL/TP values were nonsensical compared to the live market price.
+    - **Fix:** Made the `mt5_order_executor.py` script smarter. It now fetches the live price before trading and calculates its own valid SL/TP for testing purposes.
+
+5.  **Host Script Credential Failure:** The host-side scripts (`mt5_order_executor.py`, `mt5_bridge.py`) were not loading the MT5 account credentials correctly, causing them to initialize on "Account 0" and fail.
+    - **Fix:** After a long investigation involving adding debug logging and inspecting `.env` files, the user decided on a unified approach. All host scripts were modified to load plain-text credentials (`MT5_ACCOUNT`, `MT5_PASSWORD`) from a `.env` file, standardizing the configuration.
+
+6.  **`ModuleNotFoundError`:** The host-side scripts could not find the `security_utils` module.
+    - **Fix:** Modified the scripts to add the `bot` directory to the Python `sys.path`.
+
+7.  **Invalid MT5 Comment:** The `order_send` call was failing with an "Invalid comment" error because the comment string, containing a full UUID, was too long.
+    - **Fix:** Truncated the UUID in the comment to 8 characters, bringing it within the broker's limits.
+
+8.  **Architectural Flaw: Ephemeral State:** The root cause of the testing failure was discovered. The `OrderManager` tracked trades in memory only. A trade placed by a `docker-compose exec` command was therefore invisible to the main `Consumer` process.
+    - **Fix:** Performed a major refactoring of the `OrderManager`. It now connects to the PostgreSQL database on initialization. It saves all new trades, status changes, and SL/TP modifications to a `trades` table. On startup, it loads all open trades from this table. This makes the trade state persistent and shared across the entire application.
+
+9.  **Configuration Flaw: Missing DB Host:** The final bug was the `bot` container itself not being able to connect to PostgreSQL because the `PG_HOST` environment variable was missing from `docker-compose.yml`.
+    - **Fix:** Added the required PostgreSQL connection variables to the `bot` service definition.
+
+**Final Status:**
+- The end-to-end trade pipeline is fully functional and robust.
+- The `OrderManager` is now persistent, using PostgreSQL as a single source of truth for trade status.
+- The `Consumer` process correctly loads existing open trades from the database on startup.
+- The system is now successfully executing the test of managing an open trade.
+
+**Next Step:**
+- Observe the `bot` logs to confirm the `_manage_open_positions` function is executing as expected on the open trade.

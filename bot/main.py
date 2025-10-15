@@ -150,6 +150,7 @@ def main():
     # Market Order command
     market_order_parser = subparsers.add_parser("market-order", help="Place a market order")
     market_order_parser.add_argument("symbol", type=str, help="e.g., EURUSD")
+    market_order_parser.add_argument("order_type", type=str, choices=['buy', 'sell'], help="'buy' or 'sell'")
     market_order_parser.add_argument("volume", type=float, help="e.g., 0.1")
     market_order_parser.add_argument("requested_price", type=float, help="The price the strategy wants")
     market_order_parser.add_argument("stop_loss", type=float, help="Stop loss price")
@@ -428,6 +429,8 @@ def main():
     start_trading_session_parser.add_argument("symbol", type=str, help="The primary symbol to trade (e.g., EURUSD)")
     start_trading_session_parser.add_argument("--secondary-symbol", type=str, help="An optional secondary symbol for intermarket analysis.")
     start_trading_session_parser.add_argument("--correlation-window-minutes", type=int, help="The correlation window in minutes (e.g., 60). Required if --secondary-symbol is used.")
+    start_trading_session_parser.add_argument("--quiet-period-before-minutes", type=int, default=30, help="Minutes before a high-impact event to pause trading (default: 30).")
+    start_trading_session_parser.add_argument("--quiet-period-after-minutes", type=int, default=5, help="Minutes after a high-impact event to resume trading (default: 5).")
     start_trading_session_parser.add_argument("--candle-interval-minutes", type=int, default=1, help="The interval in minutes for aggregating ticks into candles (default: 1)")
 
     # Economic Calendar command
@@ -505,7 +508,7 @@ def main():
     elif args.command in ["market-order", "limit-order", "stop-order"]:
         if args.command == "market-order":
             logger.info(f"Executing market order command for {args.symbol}")
-            order_manager.place_market_order(args.symbol, args.volume, args.requested_price, args.stop_loss, args.take_profit, args.slippage)
+            order_manager.place_market_order(args.symbol, args.order_type, args.volume, args.requested_price, args.stop_loss, args.take_profit, args.slippage)
         elif args.command == "limit-order":
             logger.info(f"Executing limit order command for {args.symbol}")
             order_manager.place_limit_order(args.symbol, args.volume, args.price, args.stop_loss, args.take_profit)
@@ -1026,6 +1029,8 @@ def main():
             symbol=args.symbol,
             secondary_symbol=args.secondary_symbol,
             correlation_window_minutes=correlation_window_minutes,
+            quiet_period_before_minutes=args.quiet_period_before_minutes,
+            quiet_period_after_minutes=args.quiet_period_after_minutes,
             candle_interval_minutes=args.candle_interval_minutes
         )
 

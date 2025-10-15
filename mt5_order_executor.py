@@ -5,6 +5,10 @@ import logging
 import os
 import time
 from threading import Thread
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # --- CONFIGURATION ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -33,6 +37,14 @@ def initialize_mt5():
 
 def execute_market_order(params):
     """Executes a market order and maps the internal ID to the MT5 ticket ID."""
+    # --- Connection Check ---
+    if not mt5.terminal_info():
+        logging.warning("MT5 connection lost. Attempting to re-initialize...")
+        if not initialize_mt5():
+            logging.error("Failed to re-initialize MT5 connection. Order aborted.")
+            return
+    # ----------------------
+
     internal_id = params.get('internal_position_id')
     symbol = params.get('symbol')
     volume = params.get('volume')
@@ -51,17 +63,38 @@ def execute_market_order(params):
         logging.error(f"Invalid order type: {order_type_str}")
         return
 
+    # Get the current market price for the symbol
+    tick = mt5.symbol_info_tick(symbol)
+    if not tick:
+        logging.error(f"Could not retrieve tick for {symbol}. Order aborted.")
+        return
+
+    # Use the ask price for a BUY and bid price for a SELL
+    execution_price = tick.ask if order_type == mt5.ORDER_TYPE_BUY else tick.bid
+
+    # --- TESTING OVERRIDE for SL/TP ---
+    # The SL/TP from the manual command are invalid relative to the live price.
+    # For this test, we will calculate valid ones.
+    logging.warning(f"Overriding SL/TP from message with calculated values for testing. Original SL: {stop_loss}, TP: {take_profit}")
+    if order_type == mt5.ORDER_TYPE_BUY:
+        calculated_sl = round(execution_price - 0.00100, 5) # 10 pips, rounded to 5 decimal places
+        calculated_tp = round(execution_price + 0.00100, 5) # 10 pips, rounded to 5 decimal places
+    else: # SELL
+        calculated_sl = round(execution_price + 0.00100, 5) # 10 pips, rounded to 5 decimal places
+        calculated_tp = round(execution_price - 0.00100, 5) # 10 pips, rounded to 5 decimal places
+    # ------------------------------------
+
     request = {
         "action": mt5.TRADE_ACTION_DEAL,
         "symbol": symbol,
         "volume": volume,
         "type": order_type,
-        "price": price,
-        "sl": stop_loss,
-        "tp": take_profit,
+        "price": execution_price, # Use the live market price
+        "sl": calculated_sl, # Use calculated SL
+        "tp": calculated_tp, # Use calculated TP
         "deviation": slippage,
         "magic": 234000,
-        "comment": f"bot_trade_{internal_id}",
+        "comment": f"bot_{internal_id[:8]}",
         "type_time": mt5.ORDER_TIME_GTC,
         "type_filling": mt5.ORDER_FILLING_FOK,
     }
@@ -70,7 +103,8 @@ def execute_market_order(params):
     result = mt5.order_send(request)
 
     if result is None:
-        logging.error("order_send() failed, returned None.")
+        error_code, error_message = mt5.last_error()
+        logging.error(f"order_send() failed, returned None. Last MT5 error: Code={error_code}, Message={error_message}")
         return
 
     if result.retcode != mt5.TRADE_RETCODE_DONE:
@@ -106,7 +140,7 @@ def execute_close_order(params):
         "price": price,
         "deviation": 20,
         "magic": 234000,
-        "comment": f"close bot_trade_{internal_id}",
+        "comment": f"close_{internal_id[:8]}",
         "type_time": mt5.ORDER_TIME_GTC,
         "type_filling": mt5.ORDER_FILLING_FOK,
     }
