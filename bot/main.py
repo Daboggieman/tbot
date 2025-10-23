@@ -10,6 +10,7 @@ from consumer import Consumer
 from influx_connector import InfluxDBConnector
 from postgresql_client import PostgreSQLConnector
 from order_manager import OrderManager
+from broker import LiveBroker, PaperBroker
 from security_utils import decrypt_message, get_encryption_key
 from historical_data_manager import HistoricalDataManager
 from backtesting_engine import BacktestingEngine
@@ -22,6 +23,9 @@ from performance_analytics import PerformanceAnalytics
 from optimization_suite import OptimizationSuite
 from visualizer import Visualizer
 from optimization_config import STRATEGY_MAP, PARAM_GRIDS
+from genetic_algorithm import GeneticAlgorithm
+from capital_allocator import CapitalAllocator
+from telegram_interface import TelegramInterface
 
 # Prometheus Metrics
 MESSAGES_SENT = Counter('bot_messages_sent_total', 'Total number of messages sent by the bot')
@@ -408,14 +412,25 @@ def main():
     # Performance Review command
     performance_review_parser = subparsers.add_parser("performance-review", help="Run automated performance review to disable underperforming strategies")
 
-    # Strategy Discovery command
-    strategy_discovery_parser = subparsers.add_parser("strategy-discovery", help="Run genetic algorithm to discover new trading strategies")
-    strategy_discovery_parser.add_argument("symbol", type=str, help="The financial instrument to use for discovery (e.g., EURUSD)")
-    strategy_discovery_parser.add_argument("timeframe", type=str, help="The timeframe for the data (e.g., D1, H1, M15)")
-    strategy_discovery_parser.add_argument("--population", type=int, default=50, help="Population size for GA")
-    strategy_discovery_parser.add_argument("--generations", type=int, default=10, help="Number of generations")
+    # Discover Strategies command
+    discover_parser = subparsers.add_parser("discover-strategies", help="Run genetic algorithm to discover new trading strategies")
+    discover_parser.add_argument("symbol", type=str, help="The financial instrument to use for discovery (e.g., EURUSD)")
+    discover_parser.add_argument("timeframe", type=str, help="The timeframe for the data (e.g., D1, H1, M15)")
+    discover_parser.add_argument("start_date", type=str, help="The start date for the backtest in YYYY-MM-DD format")
+    discover_parser.add_argument("end_date", type=str, help="The end date for the backtest in YYYY-MM-DD format")
+    discover_parser.add_argument("--population", type=int, default=50, help="Population size for GA")
+    discover_parser.add_argument("--generations", type=int, default=20, help="Number of generations for GA")
+    discover_parser.add_argument("--mutation_rate", type=float, default=0.1, help="Mutation rate for GA")
+    discover_parser.add_argument("--crossover_rate", type=float, default=0.7, help="Crossover rate for GA")
 
-    # Test Sentiment command
+    # Retrain ML Model command
+    retrain_parser = subparsers.add_parser("retrain-ml-model", help="Retrain the machine learning model on new data")
+    retrain_parser.add_argument("symbol", type=str, help="The financial instrument to use for training (e.g., EURUSD)")
+    retrain_parser.add_argument("timeframe", type=str, help="The timeframe for the data (e.g., D1, H1, M15)")
+    retrain_parser.add_argument("start_date", type=str, help="The start date for the training data in YYYY-MM-DD format")
+    retrain_parser.add_argument("end_date", type=str, help="The end date for the training data in YYYY-MM-DD format")
+    
+        # Strategy Discovery command
     test_sentiment_parser = subparsers.add_parser("test-sentiment", help="Test sentiment integration")
     test_sentiment_parser.add_argument("symbol", type=str, help="e.g., EURUSD")
     test_sentiment_parser.add_argument("timeframe", type=str, help="e.g., D1")
@@ -432,16 +447,28 @@ def main():
     start_trading_session_parser.add_argument("--quiet-period-before-minutes", type=int, default=30, help="Minutes before a high-impact event to pause trading (default: 30).")
     start_trading_session_parser.add_argument("--quiet-period-after-minutes", type=int, default=5, help="Minutes after a high-impact event to resume trading (default: 5).")
     start_trading_session_parser.add_argument("--candle-interval-minutes", type=int, default=1, help="The interval in minutes for aggregating ticks into candles (default: 1)")
+    start_trading_session_parser.add_argument("--mode", type=str, choices=['live', 'paper'], default='paper', help="The trading mode: 'live' for real trading, 'paper' for simulated trading (default: paper)")
 
     # Economic Calendar command
     economic_calendar_parser = subparsers.add_parser("fetch-economic-events", help="Fetch and display upcoming economic events")
     economic_calendar_parser.add_argument("--days", type=int, default=7, help="Number of days ahead to fetch events for (default: 7)")
 
+    # Start Telegram Interface command
+    start_telegram_parser = subparsers.add_parser("start-telegram-interface", help="Start the Telegram command interface")
+
     args = parser.parse_args()
 
+    broker = None
+    # For commands that have a mode, instantiate the correct broker.
+    if hasattr(args, 'mode') and args.mode == 'live':
+        broker = LiveBroker()
+    else:
+        # Default to PaperBroker for safety and for commands that don't specify a mode.
+        broker = PaperBroker()
+
     order_manager = None
-    if args.command not in ["start-trading-session", "status", "send-message", "start-web", "fetch-economic-events"]:
-        order_manager = OrderManager()
+    if args.command not in ["start-trading-session", "status", "send-message", "start-web", "fetch-economic-events", "start-telegram-interface"]:
+        order_manager = OrderManager(broker)
 
     if args.command == "status":
         logger.info("Checking bot service status...")
@@ -500,7 +527,8 @@ def main():
                 publisher = Publisher(BROKER_HOST, BROKER_PORT, BROKER_USER, BROKER_PASS)
                 publisher.connect()
                 publisher.publish_message("test_queue", args.message)
-                logger.info("Message sent successfully.")
+                publisher.publish_message("realtime_data", args.message)
+                logger.info("Message sent successfully to both queues.")
                 publisher.close()
             except Exception as e:
                 logger.error(f"Failed to send message: {e}")
@@ -949,24 +977,41 @@ def main():
         reviewer = PerformanceReviewer()
         reviewer.analyze_performance()
 
-    elif args.command == "strategy-discovery":
-        logger.info(f"Executing strategy-discovery command for {args.symbol}")
+    elif args.command == "discover-strategies":
+        logger.info(f"Executing strategy discovery command for {args.symbol}")
+        ga = GeneticAlgorithm(
+            population_size=args.population,
+            mutation_rate=args.mutation_rate,
+            crossover_rate=args.crossover_rate,
+            generations=args.generations,
+            symbol=args.symbol,
+            timeframe=args.timeframe,
+            start_date=args.start_date,
+            end_date=args.end_date
+        )
+        best_strategy = ga.run()
+        if best_strategy:
+            logger.info(f"Discovered best strategy: {best_strategy}")
+        else:
+            logger.error("Strategy discovery failed to find a viable strategy.")
+
+    elif args.command == "retrain-ml-model":
+        logger.info(f"Executing retrain-ml-model command for {args.symbol}")
         historical_data_manager = HistoricalDataManager()
         data = historical_data_manager.load_data_from_csv(args.symbol, args.timeframe)
         if data is None:
             logger.error(f"Could not load historical data for {args.symbol} ({args.timeframe}). Please download it first.")
             return
 
-        from genetic_algorithm import GeneticStrategyDiscovery
-        ga = GeneticStrategyDiscovery(data, population_size=args.population, generations=args.generations)
-        best_individual, best_fitness = ga.discover()
-        logger.info(f"Discovered strategy: {best_individual} with fitness {best_fitness}")
+        data = data.loc[args.start_date:args.end_date]
+        if data.empty:
+            logger.error(f"No data found for the specified date range: {args.start_date} - {args.end_date}")
+            return
 
-        # If fitness > threshold, add to config
-        if best_fitness > 0.5:  # Example threshold
-            logger.info("Promoting discovered strategy to active arsenal.")
-            # Add to STRATEGY_MAP or something, but for now, just log
-            # TODO: Implement promotion
+        ml_strategy = MachineLearningStrategy()
+        X, y = ml_strategy.prepare_data(data.copy())
+        ml_strategy.train_model(X, y)
+        logger.info("ML model retraining complete.")
 
     elif args.command == "test-sentiment":
         logger.info(f"Executing test-sentiment command for {args.symbol}")
@@ -1021,18 +1066,26 @@ def main():
             correlation_window_minutes = args.correlation_window_minutes
             logger.info(f"Using correlation window: {correlation_window_minutes} minutes for intermarket analysis.")
 
+        # Initialize CapitalAllocator
+        capital_allocator = CapitalAllocator()
+
         consumer = Consumer(
             host=BROKER_HOST,
             port=BROKER_PORT,
             username=BROKER_USER,
             password=BROKER_PASS,
             symbol=args.symbol,
+            broker=broker,  # Pass the selected broker
+            capital_allocator=capital_allocator, # Pass the capital allocator
             secondary_symbol=args.secondary_symbol,
             correlation_window_minutes=correlation_window_minutes,
             quiet_period_before_minutes=args.quiet_period_before_minutes,
             quiet_period_after_minutes=args.quiet_period_after_minutes,
             candle_interval_minutes=args.candle_interval_minutes
         )
+
+        # Update the selector's allocator after consumer is created
+        consumer.strategy_selector.capital_allocator = capital_allocator
 
         consumer.connect()
         consumer.start_consuming("realtime_data")
@@ -1046,6 +1099,16 @@ def main():
             print(events_df[['date', 'time', 'currency', 'event', 'importance']].to_string())
         else:
             logger.warning("Could not fetch any economic events or no events are scheduled.")
+
+    elif args.command == "start-telegram-interface":
+        logger.info("Starting Telegram interface...")
+        try:
+            interface = TelegramInterface()
+            interface.run()
+        except ValueError as e:
+            logger.critical(f"Failed to start Telegram interface: {e}")
+        except Exception as e:
+            logger.critical(f"An unexpected error occurred in the Telegram interface: {e}", exc_info=True)
 
     else:
         parser.print_help()

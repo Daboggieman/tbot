@@ -46,43 +46,6 @@ except (ValueError, TypeError, AttributeError) as e:
     # but it will likely fail on subsequent operations.
     pass
 
-# --- Market Data Consumer Thread ---
-class MarketDataConsumer(Consumer):
-    def __init__(self, broker_host, broker_port, broker_user, broker_pass, queue_name='market_data_queue'):
-        super().__init__(broker_host, broker_port, broker_user, broker_pass, queue_name)
-        self.daemon = True # Allow main program to exit even if thread is still running
-
-    def on_message_callback(self, ch, method, properties, body):
-        global latest_market_data
-        try:
-            data = json.loads(body.decode('utf-8'))
-            symbol = data.get('symbol')
-            if symbol:
-                latest_market_data[symbol] = data
-                # print(f"Received and updated market data for {symbol}: {data.get('bid')}/{data.get('ask')}") # For debugging
-        except json.JSONDecodeError as e:
-            print(f"Error decoding JSON from RabbitMQ: {e}")
-        except Exception as e:
-            print(f"Error processing market data message: {e}")
-
-market_data_consumer_thread = None
-
-def start_market_data_consumer():
-    global market_data_consumer_thread
-    if market_data_consumer_thread is None:
-        try:
-            consumer = MarketDataConsumer(BROKER_HOST, BROKER_PORT, BROKER_USER, BROKER_PASS)
-            market_data_consumer_thread = threading.Thread(target=consumer.start_consuming, args=('market_data_queue',))
-            market_data_consumer_thread.daemon = True
-            market_data_consumer_thread.start()
-            print("Market data consumer thread started.")
-        except Exception as e:
-            print(f"Failed to start market data consumer thread: {e}")
-
-# Call this function when the app starts
-with app.app_context():
-    start_market_data_consumer()
-
 # Dummy user data for demonstration
 USERS = {
     "admin": "adminpass",
@@ -219,17 +182,6 @@ def api_economic_events():
             return jsonify([])
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-@app.route('/api/live-market-data/<symbol>')
-def api_live_market_data(symbol):
-    if 'username' not in session:
-        return jsonify({"error": "Unauthorized"}), 401
-    
-    data = latest_market_data.get(symbol.upper())
-    if data:
-        return jsonify(data)
-    else:
-        return jsonify({"error": "Market data not found for symbol", "symbol": symbol}), 404
 
 @app.route('/api/open-positions')
 def api_open_positions():

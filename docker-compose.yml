@@ -87,6 +87,8 @@ services:
       PG_DBNAME: "mt5_trade_records"
       PG_HOST: "postgresql"
       PG_PORT: "5432"
+      TELEGRAM_BOT_TOKEN: "8457857593:AAHk-4lnfyXOZ7s8gXDKurjDbTZ_p1vpvv8"
+      TELEGRAM_CHAT_ID: "6898264540"
     
     networks:
       - backend_network

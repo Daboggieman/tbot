@@ -1,3 +1,4 @@
+import logging
 import pandas as pd
 from typing import Dict, Any
 
@@ -12,21 +13,10 @@ from realtime_strategies import (
 from optimization_config import BEST_PARAMS, DISABLED_STRATEGIES
 
 class StrategySelector:
-    """
-    The "master-mind" module responsible for analyzing market conditions and
-    dynamically selecting the most appropriate trading strategy.
-    """
-
-    def __init__(self, market_context_analyzer: Any, thematic_analyzer: Any):
-        """
-        Initializes the StrategySelector.
-
-        Args:
-            market_context_analyzer: An instance of the market context analyzer.
-            thematic_analyzer: An instance of the thematic analyzer.
-        """
+    def __init__(self, market_context_analyzer: Any, thematic_analyzer: Any, capital_allocator: Any):
         self.market_context_analyzer = market_context_analyzer
         self.thematic_analyzer = thematic_analyzer
+        self.capital_allocator = capital_allocator
         self.available_strategies = {
             "sentiment": RealtimeSentimentAwareMovingAverageCrossoverStrategy,
             "intermarket": RealtimeIntermarketAwareMovingAverageCrossoverStrategy,
@@ -120,62 +110,99 @@ class StrategySelector:
         has_inflation_theme = 'inflation' in themes
 
         # Step 3: Decision Logic
-        print(f"Strong Sentiment: {has_strong_sentiment}, Engulfing Pattern: {has_engulfing_pattern}, Inflation Theme: {has_inflation_theme}")
+        logging.info(f"Decision Factors: Strong Sentiment: {has_strong_sentiment}, Engulfing Pattern: {has_engulfing_pattern}, Inflation Theme: {has_inflation_theme}")
 
-        if has_inflation_theme and has_strong_sentiment and "thematic" not in DISABLED_STRATEGIES:
-            print("Decision: Strong sentiment around a key theme. Selecting ThematicStrategy.")
-            return self.available_strategies["thematic"](
-                symbol=symbol,
-                data=market_data,
-                required_themes=['inflation']
-            )
+        # Check capital allocation before considering any strategy
+        # Thematic Strategy
+        if "thematic" not in DISABLED_STRATEGIES:
+            allocation = self.capital_allocator.get_allocation("thematic")
+            if allocation > 0:
+                if has_inflation_theme and has_strong_sentiment:
+                    logging.info(f"Decision: Strong sentiment around a key theme. Selecting ThematicStrategy. Allocation: {allocation:.2%}")
+                    return self.available_strategies["thematic"](
+                        symbol=symbol,
+                        data=market_data,
+                        required_themes=['inflation']
+                    )
+                else:
+                    logging.debug(f"Thematic strategy not selected: conditions not met. Allocation: {allocation:.2%}")
+            else:
+                logging.debug(f"Thematic strategy not selected: no capital allocated. Allocation: {allocation:.2%}")
 
-        elif has_engulfing_pattern and regime == 'Volatile' and "pattern" not in DISABLED_STRATEGIES:
-            print("Decision: High volatility with a reversal pattern. Selecting PatternBasedStrategy.")
-            return self.available_strategies["pattern"](
-                symbol=symbol,
-                data=market_data,
-                patterns_to_use=['Engulfing']
-            )
+        # Pattern-Based Strategy
+        if "pattern" not in DISABLED_STRATEGIES:
+            allocation = self.capital_allocator.get_allocation("pattern")
+            if allocation > 0:
+                if has_engulfing_pattern and regime == 'Volatile':
+                    logging.info(f"Decision: High volatility with a reversal pattern. Selecting PatternBasedStrategy. Allocation: {allocation:.2%}")
+                    return self.available_strategies["pattern"](
+                        symbol=symbol,
+                        data=market_data,
+                        patterns_to_use=['Engulfing']
+                    )
+                else:
+                    logging.debug(f"Pattern-based strategy not selected: conditions not met. Allocation: {allocation:.2%}")
+            else:
+                logging.debug(f"Pattern-based strategy not selected: no capital allocated. Allocation: {allocation:.2%}")
 
-        elif has_strong_sentiment and "sentiment" not in DISABLED_STRATEGIES:
-            print("Decision: Strong sentiment detected. Selecting SentimentAwareMovingAverageCrossoverStrategy.")
-            param_key = self.param_mapping["sentiment"]
-            params = BEST_PARAMS.get(param_key, {}) if param_key else {}
-            adjusted_params = self._adjust_params_for_regime(param_key, params, regime) if param_key in self.regime_adjustments else params
-            print(f"Adjusted params for sentiment strategy: {adjusted_params}")
-            return self.available_strategies["sentiment"](
-                symbol=symbol,
-                data=market_data,
-                sentiment_threshold=0.5,
-                **adjusted_params
-            )
+        # Sentiment-Aware Strategy
+        if "sentiment" not in DISABLED_STRATEGIES:
+            allocation = self.capital_allocator.get_allocation("sentiment")
+            if allocation > 0:
+                if has_strong_sentiment:
+                    logging.info(f"Decision: Strong sentiment detected. Selecting SentimentAwareMovingAverageCrossoverStrategy. Allocation: {allocation:.2%}")
+                    param_key = self.param_mapping["sentiment"]
+                    params = BEST_PARAMS.get(param_key, {}) if param_key else {}
+                    adjusted_params = self._adjust_params_for_regime(param_key, params, regime) if param_key in self.regime_adjustments else params
+                    logging.debug(f"Adjusted params for sentiment strategy: {adjusted_params}")
+                    return self.available_strategies["sentiment"](
+                        symbol=symbol,
+                        data=market_data,
+                        sentiment_threshold=0.5,
+                        **adjusted_params
+                    )
+                else:
+                    logging.debug(f"Sentiment-aware strategy not selected: conditions not met. Allocation: {allocation:.2%}")
+            else:
+                logging.debug(f"Sentiment-aware strategy not selected: no capital allocated. Allocation: {allocation:.2%}")
 
-        elif regime == 'Ranging' and "simple_ma" not in DISABLED_STRATEGIES:
-            print("Decision: Ranging market. Selecting simple RealtimeMovingAverageCrossoverStrategy.")
-            param_key = self.param_mapping["simple_ma"]
-            params = BEST_PARAMS.get(param_key, {}) if param_key else {}
-            adjusted_params = self._adjust_params_for_regime(param_key, params, regime)
-            return self.available_strategies["simple_ma"](
-                symbol=symbol,
-                data=market_data,
-                **adjusted_params
-            )
+        # Simple MA Crossover Strategy (for Ranging markets)
+        if "simple_ma" not in DISABLED_STRATEGIES:
+            allocation = self.capital_allocator.get_allocation("simple_ma")
+            if allocation > 0:
+                if regime == 'Ranging':
+                    logging.info(f"Decision: Ranging market. Selecting simple RealtimeMovingAverageCrossoverStrategy. Allocation: {allocation:.2%}")
+                    param_key = self.param_mapping["simple_ma"]
+                    params = BEST_PARAMS.get(param_key, {}) if param_key else {}
+                    adjusted_params = self._adjust_params_for_regime(param_key, params, regime)
+                    return self.available_strategies["simple_ma"](
+                        symbol=symbol,
+                        data=market_data,
+                        **adjusted_params
+                    )
+                else:
+                    logging.debug(f"Simple MA strategy not selected: conditions not met. Allocation: {allocation:.2%}")
+            else:
+                logging.debug(f"Simple MA strategy not selected: no capital allocated. Allocation: {allocation:.2%}")
 
-        elif "intermarket" not in DISABLED_STRATEGIES:
-            print("Decision: Defaulting to IntermarketAware strategy for general conditions.")
-            param_key = self.param_mapping["intermarket"]
-            params = BEST_PARAMS.get(param_key, {}) if param_key else {}
-            adjusted_params = self._adjust_params_for_regime(param_key, params, regime) if param_key in self.regime_adjustments else params
-            print(f"Adjusted params for intermarket strategy: {adjusted_params}")
-            return self.available_strategies["intermarket"](
-                symbol=symbol,
-                data=market_data,
-                market_context_analyzer=self.market_context_analyzer,
-                correlation_symbol='SPY',
-                **adjusted_params
-            )
+        # Intermarket Aware Strategy (Default/General conditions)
+        if "intermarket" not in DISABLED_STRATEGIES:
+            allocation = self.capital_allocator.get_allocation("intermarket")
+            if allocation > 0:
+                logging.info(f"Decision: Defaulting to IntermarketAware strategy for general conditions. Allocation: {allocation:.2%}")
+                param_key = self.param_mapping["intermarket"]
+                params = BEST_PARAMS.get(param_key, {}) if param_key else {}
+                adjusted_params = self._adjust_params_for_regime(param_key, params, regime) if param_key in self.regime_adjustments else params
+                logging.debug(f"Adjusted params for intermarket strategy: {adjusted_params}")
+                return self.available_strategies["intermarket"](
+                    symbol=symbol,
+                    data=market_data,
+                    market_context_analyzer=self.market_context_analyzer,
+                    correlation_symbol='SPY',
+                    **adjusted_params
+                )
+            else:
+                logging.debug(f"Intermarket strategy not selected: no capital allocated. Allocation: {allocation:.2%}")
 
-        else:
-            print("All strategies are disabled or no suitable strategy found.")
-            return None
+        logging.info("All strategies are disabled or no suitable strategy found with allocated capital.")
+        return None

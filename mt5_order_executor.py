@@ -7,8 +7,9 @@ import time
 from threading import Thread
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
 load_dotenv()
+
+print("Executor script starting...")
 
 # --- CONFIGURATION ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -23,6 +24,8 @@ RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "localhost")
 RABBITMQ_USER = os.getenv("BROKER_USER", "guest")
 RABBITMQ_PASS = os.getenv("BROKER_PASS", "guest")
 TRADE_ORDERS_QUEUE = 'trade_orders'
+MT5_REQUESTS_QUEUE = 'mt5_requests'
+BOT_DATA_QUEUE = 'realtime_data' # Queue to send account info back to the bot
 
 # In-memory mapping of bot's internal IDs to MT5 ticket IDs
 position_map = {}
@@ -37,13 +40,11 @@ def initialize_mt5():
 
 def execute_market_order(params):
     """Executes a market order and maps the internal ID to the MT5 ticket ID."""
-    # --- Connection Check ---
     if not mt5.terminal_info():
         logging.warning("MT5 connection lost. Attempting to re-initialize...")
         if not initialize_mt5():
             logging.error("Failed to re-initialize MT5 connection. Order aborted.")
             return
-    # ----------------------
 
     internal_id = params.get('internal_position_id')
     symbol = params.get('symbol')
@@ -63,35 +64,29 @@ def execute_market_order(params):
         logging.error(f"Invalid order type: {order_type_str}")
         return
 
-    # Get the current market price for the symbol
     tick = mt5.symbol_info_tick(symbol)
     if not tick:
         logging.error(f"Could not retrieve tick for {symbol}. Order aborted.")
         return
 
-    # Use the ask price for a BUY and bid price for a SELL
     execution_price = tick.ask if order_type == mt5.ORDER_TYPE_BUY else tick.bid
 
-    # --- TESTING OVERRIDE for SL/TP ---
-    # The SL/TP from the manual command are invalid relative to the live price.
-    # For this test, we will calculate valid ones.
     logging.warning(f"Overriding SL/TP from message with calculated values for testing. Original SL: {stop_loss}, TP: {take_profit}")
     if order_type == mt5.ORDER_TYPE_BUY:
-        calculated_sl = round(execution_price - 0.00100, 5) # 10 pips, rounded to 5 decimal places
-        calculated_tp = round(execution_price + 0.00100, 5) # 10 pips, rounded to 5 decimal places
+        calculated_sl = round(execution_price - 0.00100, 5)
+        calculated_tp = round(execution_price + 0.00100, 5)
     else: # SELL
-        calculated_sl = round(execution_price + 0.00100, 5) # 10 pips, rounded to 5 decimal places
-        calculated_tp = round(execution_price - 0.00100, 5) # 10 pips, rounded to 5 decimal places
-    # ------------------------------------
+        calculated_sl = round(execution_price + 0.00100, 5)
+        calculated_tp = round(execution_price - 0.00100, 5)
 
     request = {
         "action": mt5.TRADE_ACTION_DEAL,
         "symbol": symbol,
         "volume": volume,
         "type": order_type,
-        "price": execution_price, # Use the live market price
-        "sl": calculated_sl, # Use calculated SL
-        "tp": calculated_tp, # Use calculated TP
+        "price": execution_price,
+        "sl": calculated_sl,
+        "tp": calculated_tp,
         "deviation": slippage,
         "magic": 234000,
         "comment": f"bot_{internal_id[:8]}",
@@ -111,7 +106,6 @@ def execute_market_order(params):
         logging.error(f"order_send failed, retcode={result.retcode} - {result.comment}")
     else:
         logging.info(f"Market order successfully placed: {result}")
-        # Map the internal ID to the real MT5 ticket ID
         position_map[internal_id] = result.order
         logging.info(f"Mapped internal ID {internal_id} to MT5 ticket {result.order}")
 
@@ -128,7 +122,6 @@ def execute_close_order(params):
         logging.error(f"Cannot close position: No MT5 ticket found for internal ID {internal_id}")
         return
 
-    # Determine the correct closing order type
     close_order_type = mt5.ORDER_TYPE_SELL if original_order_type == 'BUY' else mt5.ORDER_TYPE_BUY
 
     request = {
@@ -152,7 +145,6 @@ def execute_close_order(params):
         logging.error(f"Close order failed, retcode={result.retcode} - {result.comment}")
     else:
         logging.info(f"Position {ticket_id} closed successfully: {result}")
-        # Remove from map after closing
         del position_map[internal_id]
 
 def execute_modify_order(params):
@@ -181,9 +173,9 @@ def execute_modify_order(params):
     else:
         logging.info(f"Position {ticket_id} modified successfully: {result}")
 
-def callback(ch, method, properties, body):
-    """Callback function to process messages from the queue."""
-    logging.info(f"Received message: {body.decode()}")
+def trade_orders_callback(ch, method, properties, body):
+    """Callback function to process messages from the trade orders queue."""
+    logging.info(f"Received trade order: {body.decode()}")
     try:
         message = json.loads(body)
         command = message.get('command')
@@ -196,44 +188,92 @@ def callback(ch, method, properties, body):
         elif command == "modify_position":
             execute_modify_order(params)
         else:
-            logging.warning(f"Unknown command received: {command}")
+            logging.warning(f"Unknown command received in trade queue: {command}")
 
     except json.JSONDecodeError:
         logging.error(f"Failed to decode JSON message: {body.decode()}")
     except Exception as e:
-        logging.error(f"An error occurred while processing message: {e}")
+        logging.error(f"An error occurred while processing trade order: {e}")
 
     ch.basic_ack(delivery_tag=method.delivery_tag)
 
-def start_consumer():
+def start_trade_orders_consumer():
     """Starts the RabbitMQ consumer to listen for trade orders."""
     while True:
         try:
             credentials = pika.PlainCredentials(RABBITMQ_USER, RABBITMQ_PASS)
-            connection = pika.BlockingConnection(
-                pika.ConnectionParameters(host=RABBITMQ_HOST, credentials=credentials)
-            )
+            connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST, credentials=credentials))
             channel = connection.channel()
             channel.queue_declare(queue=TRADE_ORDERS_QUEUE, durable=True)
             channel.basic_qos(prefetch_count=1)
-            channel.basic_consume(queue=TRADE_ORDERS_QUEUE, on_message_callback=callback)
-
-            logging.info(f"[*] Waiting for messages on queue '{TRADE_ORDERS_QUEUE}'. To exit press CTRL+C")
+            channel.basic_consume(queue=TRADE_ORDERS_QUEUE, on_message_callback=trade_orders_callback)
+            logging.info(f"[*] Waiting for messages on queue '{TRADE_ORDERS_QUEUE}'.")
             channel.start_consuming()
         except pika.exceptions.AMQPConnectionError as e:
-            logging.error(f"RabbitMQ connection failed: {e}. Retrying in 10 seconds...")
+            logging.error(f"Trade consumer RabbitMQ connection failed: {e}. Retrying in 10 seconds...")
             time.sleep(10)
         except Exception as e:
-            logging.error(f"An unexpected error occurred in consumer: {e}. Retrying in 10 seconds...")
+            logging.error(f"An unexpected error occurred in trade consumer: {e}. Retrying in 10 seconds...")
+            time.sleep(10)
+
+def requests_callback(ch, method, properties, body):
+    """Callback for processing requests from the bot."""
+    logging.info(f"Received request: {body.decode()}")
+    try:
+        message = json.loads(body)
+        command = message.get('command')
+        if command == "get_account_info":
+            account_info = mt5.account_info()
+            if account_info:
+                response = {
+                    "type": "account_info",
+                    "balance": account_info.balance,
+                    "equity": account_info.equity,
+                    "timestamp": time.time()
+                }
+                ch.basic_publish(exchange='', routing_key=BOT_DATA_QUEUE, body=json.dumps(response))
+                logging.info(f"Sent account info to bot: {response}")
+            else:
+                logging.error(f"Could not retrieve account info from MT5. Error: {mt5.last_error()}")
+        else:
+            logging.warning(f"Unknown command received in request queue: {command}")
+    except Exception as e:
+        logging.error(f"Error processing request: {e}")
+    ch.basic_ack(delivery_tag=method.delivery_tag)
+
+def start_requests_consumer():
+    """Starts the RabbitMQ consumer to listen for requests from the bot."""
+    while True:
+        try:
+            credentials = pika.PlainCredentials(RABBITMQ_USER, RABBITMQ_PASS)
+            connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST, credentials=credentials))
+            channel = connection.channel()
+            channel.queue_declare(queue=MT5_REQUESTS_QUEUE, durable=True)
+            channel.queue_declare(queue=BOT_DATA_QUEUE, durable=True) # Ensure response queue exists
+            channel.basic_qos(prefetch_count=1)
+            channel.basic_consume(queue=MT5_REQUESTS_QUEUE, on_message_callback=requests_callback)
+            logging.info(f"[*] Waiting for messages on queue '{MT5_REQUESTS_QUEUE}'.")
+            channel.start_consuming()
+        except pika.exceptions.AMQPConnectionError as e:
+            logging.error(f"Request consumer RabbitMQ connection failed: {e}. Retrying in 10 seconds...")
+            time.sleep(10)
+        except Exception as e:
+            logging.error(f"An unexpected error occurred in request consumer: {e}. Retrying in 10 seconds...")
             time.sleep(10)
 
 if __name__ == "__main__":
+    print("Entering main execution block...")
     if not initialize_mt5():
         exit(1)
 
-    # Run the consumer in a separate thread
-    consumer_thread = Thread(target=start_consumer, daemon=True)
-    consumer_thread.start()
+    # Start the two consumers in separate threads
+    trade_consumer_thread = Thread(target=start_trade_orders_consumer, daemon=True)
+    request_consumer_thread = Thread(target=start_requests_consumer, daemon=True)
+    
+    trade_consumer_thread.start()
+    request_consumer_thread.start()
+
+    logging.info("All consumers started.")
 
     # Keep the main thread alive to handle shutdown
     try:

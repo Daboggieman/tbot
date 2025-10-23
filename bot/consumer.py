@@ -18,30 +18,44 @@ from thematic_analyzer import ThematicAnalyzer
 from strategy_selector import StrategySelector
 from historical_data_manager import HistoricalDataManager
 from technical_indicators import calculate_atr
+from telegram_notifier import TelegramNotifier
+
 
 class Consumer:
-    def __init__(self, host, port, username, password, symbol, secondary_symbol=None, correlation_window_minutes=60, quiet_period_before_minutes=30, quiet_period_after_minutes=5, candle_interval_minutes=1, default_volume=0.1, default_sl_points=50, default_tp_points=100, default_slippage=5, trailing_stop_pips=20):
+    def __init__(self, host, port, username, password, symbol, broker, capital_allocator, secondary_symbol=None, correlation_window_minutes=60, quiet_period_before_minutes=30, quiet_period_after_minutes=5, candle_interval_minutes=1, default_volume=0.1, default_sl_points=50, default_tp_points=100, default_slippage=5, trailing_stop_pips=20, risk_per_trade_percent=1.0, atr_multiplier=1.5):
         self.host = host
         self.port = port
         self.username = username
         self.password = password
         self.symbol = symbol
+        self.broker = broker
+        self.capital_allocator = capital_allocator
         self.secondary_symbol = secondary_symbol
         self.default_volume = default_volume
         self.default_sl_points = default_sl_points
         self.default_tp_points = default_tp_points
         self.default_slippage = default_slippage
         self.trailing_stop_pips = trailing_stop_pips
+        self.risk_per_trade_percent = risk_per_trade_percent
+        self.atr_multiplier = atr_multiplier
         self.pip_size = 0.0001 # Assuming forex pip size
         self.confidence_threshold = 40 # Hardcoded threshold
         self.candle_interval = timedelta(minutes=candle_interval_minutes)
         self.candle_interval_minutes = candle_interval_minutes
         
+        # --- Account State ---
+        # Initial default values, updated by live data from the executor.
+        self.account_balance = 10000.0
+        self.account_equity = 10000.0
+        self.last_account_info_request = time.time()
+        # ---------------------
+
         self.connection = None
         self.channel = None
-        self.order_manager = OrderManager()
+        self.order_manager = OrderManager(self.broker, self.capital_allocator)
         self.news_fetcher = NewsFetcher()
         self.scorer = SignalScorer()
+        self.notifier = TelegramNotifier()
         
         self.sentiment_score = 0.0
         self.themes = []
@@ -70,7 +84,8 @@ class Consumer:
         self.thematic_analyzer = ThematicAnalyzer()
         self.strategy_selector = StrategySelector(
             market_context_analyzer=self.market_analyzer,
-            thematic_analyzer=self.thematic_analyzer
+            thematic_analyzer=self.thematic_analyzer,
+            capital_allocator=self.capital_allocator
         )
 
         # Prime the data buffer with historical data to avoid a cold start
@@ -79,6 +94,11 @@ class Consumer:
         # Load economic events in a background thread to avoid blocking startup
         events_thread = threading.Thread(target=self._load_economic_events, daemon=True)
         events_thread.start()
+
+        # Request account info on startup
+        self.order_manager.request_account_info()
+        self.notifier.send_message(f"✅ **Consumer Initialized**\nSymbol: {self.symbol}\nMode: {self.broker.mode}")
+
 
     def _get_timeframe_string(self):
         timeframe_map = {1: 'M1', 5: 'M5', 15: 'M15', 60: 'H1', 1440: 'D1'}
@@ -165,6 +185,7 @@ class Consumer:
         self.connection = pika.BlockingConnection(parameters)
         self.channel = self.connection.channel()
         logging.info("Consumer connected to RabbitMQ successfully.")
+        self.notifier.send_message("✅ Consumer connected to RabbitMQ successfully.")
 
     def _load_economic_events(self):
         """Fetches and stores high-impact economic events for the next 7 days."""
@@ -191,6 +212,7 @@ class Consumer:
         for event_time in self.high_impact_events:
             if (event_time - self.quiet_period_before) <= now_utc <= (event_time + self.quiet_period_after):
                 logging.warning(f"Trading paused. In quiet period for high-impact event at {event_time}.")
+                self.notifier.send_message(f"⚠️ Trading paused. In quiet period for high-impact event at {event_time}.")
                 return True
         return False
 
@@ -214,19 +236,23 @@ class Consumer:
             if order_type == 'BUY':
                 if current_price <= sl:
                     logging.info(f"Stop loss hit for BUY position {pid} at price {current_price}.")
+                    self.notifier.send_message(f"🔴 SL Hit for BUY position {pid} at {current_price}.")
                     self.order_manager.close_position(pid, current_price)
                     continue # Move to next position
                 if current_price >= tp:
                     logging.info(f"Take profit hit for BUY position {pid} at price {current_price}.")
+                    self.notifier.send_message(f"🟢 TP Hit for BUY position {pid} at {current_price}.")
                     self.order_manager.close_position(pid, current_price)
                     continue
             elif order_type == 'SELL':
                 if current_price >= sl:
                     logging.info(f"Stop loss hit for SELL position {pid} at price {current_price}.")
+                    self.notifier.send_message(f"🔴 SL Hit for SELL position {pid} at {current_price}.")
                     self.order_manager.close_position(pid, current_price)
                     continue
                 if current_price <= tp:
                     logging.info(f"Take profit hit for SELL position {pid} at price {current_price}.")
+                    self.notifier.send_message(f"🟢 TP Hit for SELL position {pid} at {current_price}.")
                     self.order_manager.close_position(pid, current_price)
                     continue
 
@@ -239,6 +265,7 @@ class Consumer:
                     # We only move the stop loss up, never down
                     if new_sl > sl:
                         logging.info(f"Trailing stop for BUY position {pid}. New SL: {new_sl}")
+                        self.notifier.send_message(f"📈 Trailing SL for BUY {pid}. New SL: {new_sl}")
                         self.order_manager.modify_position(pid, new_stop_loss=new_sl)
             elif order_type == 'SELL':
                 # If price moves in our favor, trail the stop loss
@@ -247,6 +274,7 @@ class Consumer:
                     # We only move the stop loss down, never up
                     if new_sl < sl:
                         logging.info(f"Trailing stop for SELL position {pid}. New SL: {new_sl}")
+                        self.notifier.send_message(f"📉 Trailing SL for SELL {pid}. New SL: {new_sl}")
                         self.order_manager.modify_position(pid, new_stop_loss=new_sl)
 
     def _update_news_data(self):
@@ -297,11 +325,30 @@ class Consumer:
 
     def _callback(self, ch, method, properties, body):
         try:
-            if self._is_in_quiet_period():
+            data = json.loads(body.decode())
+            msg_type = data.get('type')
+
+            # --- Handle different message types ---
+            if msg_type == 'account_info':
+                self.account_balance = data.get('balance', self.account_balance)
+                self.account_equity = data.get('equity', self.account_equity)
+                logging.info(f"Received account update: Balance=${self.account_balance:,.2f}, Equity=${self.account_equity:,.2f}")
                 ch.basic_ack(delivery_tag=method.delivery_tag)
                 return
 
-            tick_data = json.loads(body.decode())
+            # Assume it's tick data if no type or a different type
+            tick_data = data
+            
+            # --- Request account info periodically ---
+            current_time = time.time()
+            if current_time - self.last_account_info_request > 60: # Request every 60 seconds
+                self.order_manager.request_account_info()
+                self.last_account_info_request = current_time
+                logging.info("Requested account info update.")
+
+            if self._is_in_quiet_period():
+                ch.basic_ack(delivery_tag=method.delivery_tag)
+                return
 
             if self.market_analyzer:
                 self.market_analyzer.handle_tick(tick_data)
@@ -348,7 +395,8 @@ class Consumer:
             selected_strategy = self.strategy_selector.select_strategy(context)
 
             if selected_strategy:
-                logging.info(f"Strategy selected: {type(selected_strategy).__name__}")
+                strategy_name = type(selected_strategy).__name__
+                logging.info(f"Strategy selected: {strategy_name}")
                 signal = selected_strategy.generate_signal(context)
                 if signal != 'HOLD' and self.detected_patterns:
                     self.detected_patterns = []
@@ -365,63 +413,40 @@ class Consumer:
 
                 if confidence_score > self.confidence_threshold:
                     logging.info(f"Confidence score {confidence_score} exceeds threshold ({self.confidence_threshold}). Placing trade.")
+                    self.notifier.send_message(f"💡 **Signal Alert** ({self.symbol})\nSignal: {signal}\nStrategy: {strategy_name}\nConfidence: {confidence_score:.2f}/100")
                     
-                    # Dynamically calculate volume based on confidence score
-                    min_volume = self.default_volume / 2
-                    max_volume = self.default_volume * 1.5
-                    
-                    # Scale the confidence score from its threshold-based range to a 0-1 range
-                    confidence_range = 100 - self.confidence_threshold
-                    score_in_range = confidence_score - self.confidence_threshold
-                    scaling_factor = score_in_range / confidence_range if confidence_range > 0 else 1.0
-                    
-                    # Apply the scaling factor to the volume range
-                    volume_confidence_scaled = min_volume + (scaling_factor * (max_volume - min_volume))
-
-                    # --- Volatility Adjustment (ATR) ---
-                    # TODO: Make TARGET_ATR_NORMAL dynamic based on historical volatility
-                    TARGET_ATR_NORMAL = 0.0001 # Example for EURUSD M1
+                    # --- Position Sizing using Risk Management Function ---
+                    # Ensure current_atr is calculated before calling position sizing
                     current_atr = calculate_atr(market_data_df.rename(columns={'timestamp': 'Timestamp', 'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close'}))
-                    
-                    if current_atr > 0:
-                        atr_adjustment_factor = TARGET_ATR_NORMAL / current_atr
-                        # Cap the adjustment factor to prevent extreme sizes (e.g., 0.5x to 2x)
-                        atr_adjustment_factor = max(0.5, min(2.0, atr_adjustment_factor))
-                        final_volume = volume_confidence_scaled * atr_adjustment_factor
-                        logging.info(f"Volume adjusted for volatility. ATR: {current_atr:.5f}, Factor: {atr_adjustment_factor:.2f}, New Volume: {final_volume:.2f}")
-                    else:
-                        final_volume = volume_confidence_scaled
-                        logging.warning("Could not calculate ATR. Using confidence-scaled volume without volatility adjustment.")
+                    if current_atr <= 0:
+                        logging.warning("ATR is not positive. Cannot calculate position size. Holding position.")
+                        ch.basic_ack(delivery_tag=method.delivery_tag)
+                        return # Exit if ATR is invalid
 
-                    volume = round(final_volume, 2) # Round to a typical lot size precision
+                    # Get capital allocation for the selected strategy
+                    strategy_allocation_percent = self.capital_allocator.get_allocation(strategy_name)
+                    if strategy_allocation_percent <= 0:
+                        logging.warning(f"No capital allocated to {strategy_name}. Holding position.")
+                        ch.basic_ack(delivery_tag=method.delivery_tag)
+                        return
 
-                    # --- Correlation Adjustment ---
-                    open_positions = self.order_manager.get_open_positions()
-                    if open_positions and self.market_analyzer:
-                        new_symbol = tick_data.get('symbol')
-                        open_symbols = list(set(pos['symbol'] for pos in open_positions.values()))
-                        
-                        correlations = []
-                        for open_symbol in open_symbols:
-                            if new_symbol != open_symbol:
-                                correlation = self.market_analyzer.get_correlation(new_symbol, open_symbol)
-                                if correlation is not None:
-                                    correlations.append(correlation)
-                        
-                        if correlations:
-                            avg_correlation = sum(correlations) / len(correlations)
-                            correlation_adjustment_factor = 1.0
-                            # Reduce size if new trade is strongly correlated with existing portfolio
-                            if avg_correlation > 0.7:
-                                correlation_adjustment_factor = 0.5 # Halve the size
-                            elif avg_correlation > 0.5:
-                                correlation_adjustment_factor = 0.75 # Reduce by 25%
-                            
-                            if correlation_adjustment_factor < 1.0:
-                                volume = volume * correlation_adjustment_factor
-                                logging.info(f"Volume adjusted for portfolio correlation. Avg Corr: {avg_correlation:.2f}, Factor: {correlation_adjustment_factor:.2f}, Final Volume: {volume:.2f}")
+                    # Calculate effective account balance for this strategy
+                    effective_account_balance = self.account_equity * strategy_allocation_percent
 
-                    logging.info(f"Dynamic volume calculated: {volume} (Base: {self.default_volume}, Confidence: {confidence_score})")
+                    volume = self.order_manager.calculate_dynamic_position_size(
+                        symbol=tick_data.get('symbol'),
+                        account_balance=effective_account_balance,
+                        risk_per_trade_percent=self.risk_per_trade_percent,
+                        atr_value=current_atr,
+                        atr_multiplier=self.atr_multiplier
+                    )
+
+                    if volume is None or volume <= 0:
+                        logging.warning("Calculated position volume is invalid or zero. Holding position.")
+                        ch.basic_ack(delivery_tag=method.delivery_tag)
+                        return # Exit if volume is invalid
+
+                    logging.info(f"Decision Rationale: Strategy '{strategy_name}' selected. Signal: {signal}. Confidence: {confidence_score}. Allocated Capital: {strategy_allocation_percent:.2%}. Calculated Volume: {volume} lots.")
 
                     symbol = tick_data.get('symbol')
                     points_sl = self.default_sl_points
@@ -443,8 +468,10 @@ class Consumer:
 
         except json.JSONDecodeError as e:
             logging.error(f"Failed to decode JSON message: {body.decode()}", exc_info=True)
+            self.notifier.send_message(f"🔥 CRITICAL: Failed to decode JSON message: {body.decode()}")
         except Exception as e:
             logging.error(f"An unexpected error occurred in the callback: {e}", exc_info=True)
+            self.notifier.send_message(f"🔥 CRITICAL: An unexpected error occurred in the callback: {e}")
         
         ch.basic_ack(delivery_tag=method.delivery_tag)
 
@@ -461,10 +488,13 @@ class Consumer:
                 self.channel.start_consuming()
             except pika.exceptions.ConnectionClosedByBroker:
                 logging.warning("Connection closed by broker. Reconnecting...")
+                self.notifier.send_message("🔌 Connection closed by broker. Reconnecting...")
                 time.sleep(5)
             except pika.exceptions.AMQPConnectionError:
                 logging.warning("AMQP connection error. Reconnecting...")
+                self.notifier.send_message("🔌 AMQP connection error. Reconnecting...")
                 time.sleep(5)
             except Exception as e:
                 logging.error(f"An unexpected error occurred in start_consuming: {e}. Reconnecting...")
+                self.notifier.send_message(f"🔥 CRITICAL: An unexpected error occurred in start_consuming: {e}. Reconnecting...")
                 time.sleep(10)

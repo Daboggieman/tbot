@@ -86,6 +86,18 @@ class PostgreSQLConnector:
             logger.error(f"Error fetching data from {table_name}: {e}")
             return []
 
+    def fetch_all_as_dicts(self, query, columns):
+        """Executes a SELECT query and returns results as a list of dictionaries."""
+        try:
+            self._ensure_connection()
+            with self.conn.cursor() as cur:
+                cur.execute(query)
+                rows = cur.fetchall()
+                return [dict(zip(columns, row)) for row in rows]
+        except (psycopg2.Error, ConnectionError) as e:
+            logger.error(f"Error executing custom query: {e}")
+            return []
+
     def execute_update(self, query, params):
         """Executes an update query (e.g., UPDATE, DELETE)."""
         try:
