@@ -109,6 +109,17 @@ class PostgreSQLConnector:
         except (psycopg2.Error, ConnectionError) as e:
             logger.error(f"Error executing update query: {e}")
 
+    def fetch_one(self, query, params=None):
+        """Executes a SELECT query and returns a single result."""
+        try:
+            self._ensure_connection()
+            with self.conn.cursor() as cur:
+                cur.execute(query, params)
+                return cur.fetchone()
+        except (psycopg2.Error, ConnectionError) as e:
+            logger.error(f"Error executing fetch_one query: {e}")
+            return None
+
     def close(self):
         if self.conn and not self.conn.closed:
             self.conn.close()

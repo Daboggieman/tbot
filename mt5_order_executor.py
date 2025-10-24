@@ -27,8 +27,54 @@ TRADE_ORDERS_QUEUE = 'trade_orders'
 MT5_REQUESTS_QUEUE = 'mt5_requests'
 BOT_DATA_QUEUE = 'realtime_data' # Queue to send account info back to the bot
 
+import psycopg2
+
 # In-memory mapping of bot's internal IDs to MT5 ticket IDs
 position_map = {}
+
+def update_trade_in_db(internal_id, close_price, pnl):
+    """Updates the trade status to 'closed' in the PostgreSQL database."""
+    try:
+        conn = psycopg2.connect(
+            dbname=os.getenv("PG_DBNAME"),
+            user=os.getenv("POSTGRES_USER"),
+            password=os.getenv("POSTGRES_PASSWORD"),
+            host=os.getenv("PG_HOST"),
+            port=os.getenv("PG_PORT")
+        )
+        cursor = conn.cursor()
+        query = "UPDATE trades SET status = 'closed' WHERE position_id = %s"
+        cursor.execute(query, (internal_id,))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        logging.info(f"Successfully updated trade {internal_id} to closed in the database.")
+    except Exception as e:
+        logging.error(f"Database update for trade {internal_id} failed: {e}")
+
+def insert_trade_in_db(internal_id, symbol, order_type, volume, entry_price, sl, tp, mt5_ticket):
+    """Inserts a new trade into the PostgreSQL database."""
+    try:
+        conn = psycopg2.connect(
+            dbname=os.getenv("PG_DBNAME"),
+            user=os.getenv("POSTGRES_USER"),
+            password=os.getenv("POSTGRES_PASSWORD"),
+            host=os.getenv("PG_HOST"),
+            port=os.getenv("PG_PORT")
+        )
+        cursor = conn.cursor()
+        query = """
+            INSERT INTO trades 
+            (position_id, symbol, order_type, volume, entry_price, stop_loss, take_profit, status, timestamp)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, 'open', NOW())
+        """
+        cursor.execute(query, (internal_id, symbol, order_type.upper(), volume, entry_price, sl, tp))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        logging.info(f"Successfully inserted new trade {internal_id} into the database.")
+    except Exception as e:
+        logging.error(f"Database insert for trade {internal_id} failed: {e}")
 
 def initialize_mt5():
     """Initializes connection to the MetaTrader 5 terminal."""
@@ -55,7 +101,7 @@ def execute_market_order(params):
     take_profit = params.get('take_profit')
     slippage = params.get('slippage', 5)
 
-    if not all([internal_id, symbol, volume, order_type_str, price, stop_loss, take_profit]):
+    if not all([internal_id, symbol, volume, order_type_str, stop_loss, take_profit]):
         logging.error("Missing required parameters for market order.")
         return
 
@@ -106,23 +152,80 @@ def execute_market_order(params):
         logging.error(f"order_send failed, retcode={result.retcode} - {result.comment}")
     else:
         logging.info(f"Market order successfully placed: {result}")
+        # Persist the new trade to the database
+        insert_trade_in_db(
+            internal_id,
+            symbol,
+            order_type_str,
+            volume,
+            result.price, # Use the actual execution price from the result
+            calculated_sl,
+            calculated_tp,
+            result.order # This is the MT5 ticket ID
+        )
         position_map[internal_id] = result.order
         logging.info(f"Mapped internal ID {internal_id} to MT5 ticket {result.order}")
 
 def execute_close_order(params):
     """Closes an open position using its internal ID."""
     internal_id = params.get('internal_position_id')
-    price = params.get('price')
     symbol = params.get('symbol')
     volume = params.get('volume')
     original_order_type = params.get('order_type')
 
-    ticket_id = position_map.get(internal_id)
-    if not ticket_id:
-        logging.error(f"Cannot close position: No MT5 ticket found for internal ID {internal_id}")
+    if not all([internal_id, symbol, volume, original_order_type]):
+        logging.error(f"Missing required parameters for close order: {params}")
         return
 
-    close_order_type = mt5.ORDER_TYPE_SELL if original_order_type == 'BUY' else mt5.ORDER_TYPE_BUY
+    # Fetch entry price from DB to calculate PnL later
+    entry_price = None
+    try:
+        conn = psycopg2.connect(
+            dbname=os.getenv("PG_DBNAME"),
+            user=os.getenv("POSTGRES_USER"),
+            password=os.getenv("POSTGRES_PASSWORD"),
+            host=os.getenv("PG_HOST"),
+            port=os.getenv("PG_PORT")
+        )
+        cursor = conn.cursor()
+        query = "SELECT entry_price FROM trades WHERE position_id = %s"
+        cursor.execute(query, (internal_id,))
+        result = cursor.fetchone()
+        if result:
+            entry_price = result[0]
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        logging.error(f"Database fetch for entry_price on trade {internal_id} failed: {e}")
+    
+    if not entry_price:
+        logging.warning(f"Could not find entry price for trade {internal_id}. PnL will be inaccurate.")
+
+    ticket_id = position_map.get(internal_id)
+    if not ticket_id:
+        logging.warning(f"Ticket for internal ID {internal_id} not in memory map. Searching open positions by comment...")
+        positions = mt5.positions_get(symbol=symbol)
+        if positions:
+            for pos in positions:
+                if pos.comment == f"bot_{internal_id[:8]}":
+                    ticket_id = pos.ticket
+                    logging.info(f"Found ticket {ticket_id} via comment fallback for internal ID {internal_id}")
+                    position_map[internal_id] = ticket_id
+                    break
+    
+    if not ticket_id:
+        logging.warning(f"Position {internal_id} not found in MT5. Assuming it's a ghost trade and marking as closed in DB for cleanup.")
+        close_price_for_ghost = entry_price if entry_price is not None else 0
+        update_trade_in_db(internal_id, close_price_for_ghost, 0)
+        return # End of execution for this ghost trade
+
+    close_order_type = mt5.ORDER_TYPE_SELL if original_order_type.upper() == 'BUY' else mt5.ORDER_TYPE_BUY
+
+    tick = mt5.symbol_info_tick(symbol)
+    if not tick:
+        logging.error(f"Could not retrieve tick for {symbol}. Close order aborted.")
+        return
+    price = tick.bid if close_order_type == mt5.ORDER_TYPE_SELL else tick.ask
 
     request = {
         "action": mt5.TRADE_ACTION_DEAL,
@@ -141,11 +244,32 @@ def execute_close_order(params):
     logging.info(f"Sending close order request to MT5: {request}")
     result = mt5.order_send(request)
 
+    if result is None:
+        error_code, error_message = mt5.last_error()
+        logging.error(f"order_send() for close failed, returned None. Last MT5 error: Code={error_code}, Message={error_message}")
+        return
+
     if result.retcode != mt5.TRADE_RETCODE_DONE:
         logging.error(f"Close order failed, retcode={result.retcode} - {result.comment}")
     else:
         logging.info(f"Position {ticket_id} closed successfully: {result}")
-        del position_map[internal_id]
+        
+        pnl = 0
+        if entry_price:
+            try:
+                contract_size = mt5.symbol_info(symbol).trade_contract_size
+                if original_order_type.upper() == 'BUY':
+                    pnl = (price - entry_price) * volume * contract_size
+                else: # SELL
+                    pnl = (entry_price - price) * volume * contract_size
+                logging.info(f"Calculated PnL for trade {internal_id}: {pnl:.2f}")
+            except Exception as e:
+                logging.error(f"PnL calculation for trade {internal_id} failed: {e}")
+
+        update_trade_in_db(internal_id, price, pnl)
+
+        if internal_id in position_map:
+            del position_map[internal_id]
 
 def execute_modify_order(params):
     """Modifies the SL/TP of an open position."""

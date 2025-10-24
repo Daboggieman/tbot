@@ -1,13 +1,19 @@
+import collections
 import os
 import time
 import logging
 import requests
 import json
+import uuid
 from publisher import Publisher
 from influx_connector import InfluxDBConnector
 from postgresql_client import PostgreSQLConnector
 from security_utils import decrypt_message, get_encryption_key
 from economic_calendar import get_economic_events
+
+import collections
+
+import uuid
 
 class TelegramInterface:
     def __init__(self):
@@ -34,10 +40,9 @@ class TelegramInterface:
 
         self.main_menu_keyboard = {
             "keyboard": [
-                [{'text': '/status'}],
-                [{'text': '/positions'}],
-                [{'text': '/events'}],
-                [{'text': '/send'}]
+                [{'text': '/status'}, {'text': '/positions'}],
+                [{'text': '/events'}, {'text': '/performance'}],
+                [{'text': '/logs'}, {'text': '/send'}]
             ],
             "resize_keyboard": True,
             "one_time_keyboard": False
@@ -176,16 +181,97 @@ class TelegramInterface:
         
         return report
 
+    def get_performance_report(self):
+        """Calculates and returns a performance report from closed trades."""
+        report = "*Trading Performance Report*\n\n"
+        try:
+            pg = PostgreSQLConnector(dbname=os.getenv("PG_DBNAME"), user=os.getenv("POSTGRES_USER"), password=os.getenv("POSTGRES_PASSWORD"), host=os.getenv("PG_HOST"), port=os.getenv("PG_PORT"))
+            pg.connect()
+            if not pg.conn:
+                return "❌ Could not connect to PostgreSQL."
+
+            query = "SELECT pnl FROM trades WHERE status = 'closed'"
+            closed_trades_pnl = pg.fetch_all(query)
+            pg.close()
+
+            if not closed_trades_pnl:
+                return "_No closed trades found to generate a report._"
+
+            pnls = [item[0] for item in closed_trades_pnl]
+            
+            total_trades = len(pnls)
+            winning_trades = [p for p in pnls if p > 0]
+            losing_trades = [p for p in pnls if p < 0]
+
+            num_wins = len(winning_trades)
+            num_losses = len(losing_trades)
+            win_rate = (num_wins / total_trades) * 100 if total_trades > 0 else 0
+
+            total_pnl = sum(pnls)
+            gross_profit = sum(winning_trades)
+            gross_loss = sum(losing_trades)
+            
+            profit_factor = abs(gross_profit / gross_loss) if gross_loss != 0 else float('inf')
+            avg_win = gross_profit / num_wins if num_wins > 0 else 0
+            avg_loss = gross_loss / num_losses if num_losses > 0 else 0
+            
+            report += f"*Total PnL:* `{total_pnl:.2f}`\n"
+            report += f"*Profit Factor:* `{profit_factor:.2f}`\n"
+            report += f"*Total Trades:* `{total_trades}`\n"
+            report += f"*Win Rate:* `{win_rate:.2f}%`\n\n"
+            report += f"*Winning Trades:* `{num_wins}`\n"
+            report += f"*Losing Trades:* `{num_losses}`\n\n"
+            report += f"*Average Win:* `{avg_win:.2f}`\n"
+            report += f"*Average Loss:* `{avg_loss:.2f}`\n"
+
+        except Exception as e:
+            logging.error(f"Error generating performance report: {e}")
+            report = f"❌ An error occurred while generating the report:\n`{e}`"
+        
+        return report
+
+    def get_log_lines(self, num_lines=50):
+        """Reads the last N lines from the bot's log file."""
+        log_file_path = os.path.join("logs", "bot.log")
+        report = f"*Last {num_lines} Log Lines*\n\n"
+        try:
+            if not os.path.exists(log_file_path):
+                return "❌ Log file not found at `logs/bot.log`."
+
+            with open(log_file_path, 'r') as f:
+                # Use deque for efficient retrieval of last N lines
+                last_lines = collections.deque(f, num_lines)
+            
+            if not last_lines:
+                return "_Log file is empty._"
+
+            log_content = "".join(last_lines)
+
+            # Telegram messages have a size limit of 4096 characters.
+            # We reserve some space for our own formatting and truncate if necessary.
+            max_len = 4000
+            if len(log_content) > max_len:
+                log_content = f"... (truncated)\n{log_content[-max_len:]}"
+
+            report += f"```\n{log_content}\n```"
+
+        except Exception as e:
+            logging.error(f"Error reading log file: {e}")
+            report = f"❌ An error occurred while reading the log file:\n`{e}`"
+        
+        return report
+
     def handle_command(self, command_text):
         """Parses and handles a command."""
         logging.info(f"Received command: {command_text}")
         if command_text == "/start":
-            reply = "Welcome to the Trading Bot!\n\n*Available commands:*\n`/status` - Check service status.\n`/positions` - View open trades.\n`/events` - View upcoming economic events.\n`/send <queue> <message>` - Send a test message to a RabbitMQ queue."
+            reply = "Welcome to the Trading Bot!\n\n*Available commands:*\n`/status` - Check service status.\n`/positions` - View open trades.\n`/events` - View upcoming economic events.\n`/performance` - Review trading performance.\n`/logs [lines]` - Fetch recent bot logs.\n`/send <queue> <message>` - Send a test message.\n`/trade <symbol> <vol> <buy/sell>` - Place a market order."
             self.send_message(reply, reply_markup=self.main_menu_keyboard)
         elif command_text == "/status":
             self.send_message("⏳ Checking system status...")
             status_message = self.get_system_status()
-            self.send_message(status_message, reply_markup=self.main_menu_keyboard)
+            status_markup = {"inline_keyboard": [[{"text": "Refresh Status", "callback_data": "refresh_status"}]]}
+            self.send_message(status_message, reply_markup=status_markup)
         elif command_text == "/positions":
             self.send_message("⏳ Fetching open positions...")
             positions_message, inline_markup = self.get_open_positions()
@@ -193,7 +279,21 @@ class TelegramInterface:
         elif command_text == "/events":
             self.send_message("⏳ Fetching economic events...")
             events_message = self.get_economic_events_formatted()
-            self.send_message(events_message, reply_markup=self.main_menu_keyboard)
+            events_markup = {"inline_keyboard": [[{"text": "Refresh Events", "callback_data": "refresh_events"}]]}
+            self.send_message(events_message, reply_markup=events_markup)
+        elif command_text == "/performance":
+            self.send_message("⏳ Calculating performance metrics...")
+            performance_message = self.get_performance_report()
+            self.send_message(performance_message)
+        elif command_text.startswith("/logs"):
+            parts = command_text.split()
+            num_lines = 50 # Default number of lines
+            if len(parts) > 1 and parts[1].isdigit():
+                num_lines = int(parts[1])
+            
+            self.send_message(f"⏳ Fetching last {num_lines} log lines...")
+            log_message = self.get_log_lines(num_lines)
+            self.send_message(log_message)
         elif command_text.startswith("/send "):
             parts = command_text.split(' ', 2)
             if len(parts) < 3:
@@ -210,6 +310,73 @@ class TelegramInterface:
             except Exception as e:
                 logging.error(f"Error sending message to RabbitMQ: {e}")
                 self.send_message(f"❌ Failed to send message: `{e}`", reply_markup=self.main_menu_keyboard)
+        elif command_text.startswith("/trade"):
+            parts = command_text.split()
+            usage = "Usage: `/trade <symbol> <volume> <buy/sell> <sl_price> <tp_price>`"
+            if len(parts) != 6:
+                self.send_message(usage)
+                return
+
+            try:
+                _, symbol, volume_str, order_type, sl_str, tp_str = parts
+                volume = float(volume_str)
+                sl_price = float(sl_str)
+                tp_price = float(tp_str)
+                order_type = order_type.lower()
+
+                if order_type not in ['buy', 'sell']:
+                    raise ValueError("Order type must be 'buy' or 'sell'.")
+                if volume <= 0 or sl_price <= 0 or tp_price <= 0:
+                    raise ValueError("Volume and prices must be positive numbers.")
+
+            except ValueError as e:
+                self.send_message(f"Invalid arguments. {e}\n{usage}")
+                return
+
+            # Create confirmation prompt
+            confirmation_text = (
+                f"*Confirm Trade*\n\n"
+                f"Symbol: `{symbol.upper()}`\n"
+                f"Volume: `{volume}`\n"
+                f"Type: `{order_type.upper()}`\n"
+                f"SL: `{sl_price}`\n"
+                f"TP: `{tp_price}`\n\n"
+                f"Please confirm to place the trade."
+            )
+
+            # Encode trade details into callback data
+            callback_data = f"trade_confirm:{symbol}:{volume}:{order_type}:{sl_price}:{tp_price}"
+            
+            # Truncate callback_data if it's too long for Telegram API
+            if len(callback_data.encode('utf-8')) > 64:
+                self.send_message("❌ Trade details are too long for a callback. Please use shorter values.")
+                return
+
+            inline_keyboard = {
+                "inline_keyboard": [
+                    [
+                        {"text": "✅ Confirm", "callback_data": callback_data},
+                        {"text": "❌ Cancel", "callback_data": "cancel_trade"}
+                    ]
+                ]
+            }
+            self.send_message(confirmation_text, reply_markup=inline_keyboard)
+
+        elif command_text == "/webapp":
+            # URL is read from an environment variable for production configuration.
+            web_app_url = os.getenv("TELEGRAM_WEB_APP_URL", "https://<FALLBACK_URL_REPLACE_ME>")
+
+            reply_text = "Click the button below to open the web interface inside Telegram:"
+            keyboard = {
+                "inline_keyboard": [
+                    [
+                        {"text": "🚀 Open Web App", "web_app": {"url": web_app_url}}
+                    ]
+                ]
+            }
+            self.send_message(reply_text, reply_markup=keyboard)
+
+
         else:
             self.send_message(f"Unknown command: {command_text}", reply_markup=self.main_menu_keyboard)
 
@@ -220,22 +387,115 @@ class TelegramInterface:
 
         logging.info(f"Received callback query: {query_data}")
 
+        # Acknowledge the callback immediately to remove the loading icon
+        self.answer_callback_query(callback_query['id'])
+
         if query_data == "refresh_positions":
-            self.send_message("⏳ Refreshing open positions...", chat_id=chat_id)
+            self.edit_message_text(chat_id, message_id, "⏳ Refreshing open positions...")
             positions_message, inline_markup = self.get_open_positions()
             self.edit_message_text(chat_id, message_id, positions_message, reply_markup=inline_markup)
+
+        elif query_data == "refresh_status":
+            self.edit_message_text(chat_id, message_id, "⏳ Refreshing system status...")
+            status_message = self.get_system_status()
+            status_markup = {"inline_keyboard": [[{"text": "Refresh Status", "callback_data": "refresh_status"}]]}
+            self.edit_message_text(chat_id, message_id, status_message, reply_markup=status_markup)
+
+        elif query_data == "refresh_events":
+            self.edit_message_text(chat_id, message_id, "⏳ Refreshing economic events...")
+            events_message = self.get_economic_events_formatted()
+            events_markup = {"inline_keyboard": [[{"text": "Refresh Events", "callback_data": "refresh_events"}]]}
+            self.edit_message_text(chat_id, message_id, events_message, reply_markup=events_markup)
+
+        elif query_data == "cancel_trade":
+            self.edit_message_text(chat_id, message_id, "_Trade cancelled._")
+
+        elif query_data.startswith("trade_confirm:"):
+            self.edit_message_text(chat_id, message_id, f"⏳ Processing trade confirmation...")
+            try:
+                # Decode trade details from callback data
+                _, symbol, volume_str, order_type, sl_str, tp_str = query_data.split(':')
+                volume = float(volume_str)
+                sl_price = float(sl_str)
+                tp_price = float(tp_str)
+
+                # Construct and send the trade message
+                trade_message = {
+                    "command": "place_market_order",
+                    "params": {
+                        "internal_position_id": str(uuid.uuid4()),
+                        "symbol": symbol.upper(),
+                        "order_type": order_type.upper(),
+                        "volume": volume,
+                        "price": 0,  # Executor will fetch the live price
+                        "stop_loss": sl_price,
+                        "take_profit": tp_price,
+                        "slippage": 10  # Default slippage
+                    }
+                }
+
+                publisher = Publisher(os.getenv("BROKER_HOST"), 5672, self.broker_user, self.broker_pass)
+                publisher.connect()
+                publisher.publish_message('trade_orders', json.dumps(trade_message))
+                publisher.close()
+
+                self.edit_message_text(chat_id, message_id, f"✅ Trade request for {symbol.upper()} sent successfully!")
+
+            except Exception as e:
+                logging.error(f"Error processing trade confirmation: {e}")
+                self.edit_message_text(chat_id, message_id, f"❌ An error occurred while placing the trade:\n`{e}`")
+
         elif query_data.startswith("close_"):
             position_id = query_data.replace("close_", "")
-            self.send_message(f"Closing position `{position_id}`... (Not implemented yet)", chat_id=chat_id)
-            # Here you would add logic to actually close the position
-            # For now, just acknowledge and refresh
-            positions_message, inline_markup = self.get_open_positions()
-            self.edit_message_text(chat_id, message_id, positions_message, reply_markup=inline_markup)
-        else:
-            self.send_message(f"Unknown callback action: {query_data}", chat_id=chat_id)
+            self.edit_message_text(chat_id, message_id, f"⏳ Sending close request for position `{position_id}`...")
+            
+            try:
+                # 1. Fetch trade details from DB
+                pg = PostgreSQLConnector(dbname=os.getenv("PG_DBNAME"), user=os.getenv("POSTGRES_USER"), password=os.getenv("POSTGRES_PASSWORD"), host=os.getenv("PG_HOST"), port=os.getenv("PG_PORT"))
+                pg.connect()
+                if not pg.conn:
+                    self.send_message("❌ Could not connect to PostgreSQL to fetch trade details.")
+                    return
 
-        # Always answer the callback query to remove the loading animation on the button
-        self.answer_callback_query(callback_query['id'])
+                query = "SELECT symbol, order_type, volume FROM trades WHERE position_id = %s"
+                trade_details = pg.fetch_one(query, (position_id,))
+                pg.close()
+
+                if not trade_details:
+                    self.edit_message_text(chat_id, message_id, f"❌ Could not find details for position `{position_id}`. It might already be closed.")
+                    return
+
+                symbol, order_type, volume = trade_details
+
+                # 2. Construct the message for the executor
+                close_message = {
+                    "command": "close_position",
+                    "params": {
+                        "internal_position_id": position_id,
+                        "symbol": symbol,
+                        "volume": volume,
+                        "order_type": order_type
+                    }
+                }
+
+                # 3. Publish to RabbitMQ
+                publisher = Publisher(os.getenv("BROKER_HOST"), 5672, self.broker_user, self.broker_pass)
+                publisher.connect()
+                publisher.publish_message('trade_orders', json.dumps(close_message))
+                publisher.close()
+
+                # 4. Notify user and refresh the positions list
+                self.send_message(f"✅ Close request for position `{position_id}` sent successfully.")
+                time.sleep(2) # Give the executor a moment to process
+                positions_message, inline_markup = self.get_open_positions()
+                self.edit_message_text(chat_id, message_id, positions_message, reply_markup=inline_markup)
+
+            except Exception as e:
+                logging.error(f"Error processing close request for {position_id}: {e}")
+                self.send_message(f"❌ An error occurred while trying to close position `{position_id}`:\n`{e}`")
+
+        else:
+            self.send_message(f"Unknown callback action: {query_data}")
 
     def edit_message_text(self, chat_id, message_id, text, reply_markup=None):
         url = f"{self.base_url}/editMessageText"

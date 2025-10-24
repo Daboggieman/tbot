@@ -36,3 +36,6 @@ bot/historical_data/*.csv
 # Gemini-specific ignores
 .gemini/
 .geminiignore
+
+# Temporary files
+11.txt

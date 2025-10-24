@@ -1,10 +1,3 @@
----
-**CURRENT GOAL: Enhance the Control Interface**
-
-**Next Step:**
-- Implement a new page in the web UI that queries the PostgreSQL database and displays all currently open trades in a table.
----
-
 **Command Library**
 
 This library documents the common commands used for running and interacting with the trading bot project.
@@ -501,7 +494,7 @@ This roadmap outlines the evolution from a strategy-driven bot to a fully autono
   - *Status:* Implementation of a redundancy mechanism for automatic takeover by a backup bot instance is deferred until later.
 
 ---
-### telegram-int-roadmap
+### Telegram Interface (telegram-int-roadmap) (Completed)
 
 **Phase 1: Foundational Setup (Completed)**
 - Create `bot/telegram_interface.py` to house the new interface logic.
@@ -515,12 +508,59 @@ This roadmap outlines the evolution from a strategy-driven bot to a fully autono
 - Implement the `/events` command to show upcoming high-impact economic events.
 - Implement a `/send <queue> <message>` command to replicate the test message publisher functionality.
 
-**Phase 3: Beautification & User Experience**
+**Phase 3: Beautification & User Experience (Completed)**
 - Introduce a main menu using a persistent Telegram Keyboard for one-tap access to common commands (e.g., `/status`, `/positions`).
 - Refactor command responses to use proper Telegram Markdown formatting for better readability (e.g., code blocks for data, bolding for titles).
 - Implement Inline Keyboards for interactive commands. For example, after calling `/positions`, the bot could reply with buttons to refresh the list or view details of a specific trade.
 
-**Phase 4: Advanced Control & New Features**
+**Phase 4: Advanced Control & New Features (Completed)**
 - Implement a `/trade` command with inline buttons to allow placing simple market orders directly from Telegram (Note: This requires careful security considerations and confirmations).
 - Implement a `/performance` command to retrieve and display key performance indicators (KPIs) from the database.
 - Implement a `/logs` command to retrieve the last N lines from the bot's log file for remote debugging.
+
+**Debugging & Hardening Journey:**
+- **Trade Confirmation:** Implemented a confirmation step for the `/trade` command using inline keyboards to prevent accidental orders. Fixed a bug in the callback data format that caused parsing errors (`too many values to unpack`).
+- **Database Synchronization:** Resolved a critical bug where the `mt5_order_executor.py` was not updating the PostgreSQL database after opening or closing trades.
+  - **Connection Failure:** Fixed a `no password supplied` error by creating a `.env` file to provide the host-side executor with the correct database credentials and hostname (`localhost`).
+  - **Schema Mismatch:** Fixed a `column does not exist` error by modifying the executor's database functions (`update_trade_in_db`, `insert_trade_in_db`) to match the actual `trades` table schema.
+  - **Ghost Position Cleanup:** Implemented logic in the executor to automatically mark trades as `closed` in the database if they cannot be found in the MT5 terminal.
+- **Parameter Validation:** Fixed a `Missing required parameters` error in the `execute_market_order` function that incorrectly flagged a placeholder price as a missing parameter.
+- **Missing Method:** Added the `fetch_one` method to the `PostgreSQLConnector` class to resolve an `AttributeError` when closing trades.
+
+### Telegram Web App Integration (telegram-webapp-roadmap)
+
+This roadmap outlines the plan to integrate the existing Flask web UI as a Telegram Web App, making it accessible directly within the Telegram chat.
+
+**Phase 1: Core Integration (In Progress)**
+- **Expose the Web App:** The local Flask server (running on port 5000) must be made publicly accessible via a secure HTTPS URL. For local development, a tunneling service like `ngrok` is recommended (`ngrok http 5000`).
+- **Add `/webapp` Command:** Implement a new `/webapp` command in `telegram_interface.py`.
+- **Create Web App Button:** The `/webapp` command will send a message with a special inline button that contains a `web_app` field pointing to the public URL of the web interface.
+
+**Phase 2: UI/UX Enhancements**
+- **Include Telegram JS Script:** Add Telegram's official Web App JavaScript file (`telegram-web-app.js`) to the Flask app's base HTML template to enable communication between the web app and the Telegram client.
+- **Dynamic Theme Matching:** Modify the web app's CSS to use Telegram's theme variables (e.g., `var(--tg-theme-bg-color)`) so the UI automatically matches the user's Telegram theme (light, dark, etc.).
+- **Haptic Feedback:** Utilize the Web App API to provide haptic feedback (e.g., `Telegram.WebApp.HapticFeedback.notificationOccurred('success')`) for user actions to create a more native feel.
+
+**Phase 3: Bi-directional Communication**
+- **Send Data to Bot:** Implement a JavaScript function in the web app that uses `Telegram.WebApp.sendData()` to send information (e.g., text from an input field) from the web app back to the bot.
+- **Receive Data in Bot:** Enhance the `telegram_interface.py` polling loop to check for and process `web_app_data` messages sent from the web app.
+- **Close Web App Programmatically:** Add a "Close" button to the web app UI that calls `Telegram.WebApp.close()` to dismiss the web app window.
+
+### Telegram Web App Integration (telegram-webapp-roadmap)
+
+This roadmap outlines the plan to integrate the existing Flask web UI as a Telegram Web App, making it accessible directly within the Telegram chat.
+
+**Phase 1: Core Integration (In Progress)**
+- **Expose the Web App:** The local Flask server (running on port 5000) must be made publicly accessible via a secure HTTPS URL. For local development, a tunneling service like `ngrok` is recommended (`ngrok http 5000`).
+- **Add `/webapp` Command:** Implement a new `/webapp` command in `telegram_interface.py`.
+- **Create Web App Button:** The `/webapp` command will send a message with a special inline button that contains a `web_app` field pointing to the public URL of the web interface.
+
+**Phase 2: UI/UX Enhancements**
+- **Include Telegram JS Script:** Add Telegram's official Web App JavaScript file (`telegram-web-app.js`) to the Flask app's base HTML template to enable communication between the web app and the Telegram client.
+- **Dynamic Theme Matching:** Modify the web app's CSS to use Telegram's theme variables (e.g., `var(--tg-theme-bg-color)`) so the UI automatically matches the user's Telegram theme (light, dark, etc.).
+- **Haptic Feedback:** Utilize the Web App API to provide haptic feedback (e.g., `Telegram.WebApp.HapticFeedback.notificationOccurred('success')`) for user actions to create a more native feel.
+
+**Phase 3: Bi-directional Communication**
+- **Send Data to Bot:** Implement a JavaScript function in the web app that uses `Telegram.WebApp.sendData()` to send information (e.g., text from an input field) from the web app back to the bot.
+- **Receive Data in Bot:** Enhance the `telegram_interface.py` polling loop to check for and process `web_app_data` messages sent from the web app.
+- **Close Web App Programmatically:** Add a "Close" button to the web app UI that calls `Telegram.WebApp.close()` to dismiss the web app window.
