@@ -70,10 +70,10 @@ services:
     volumes:
       - ./bot:/app # Mount the bot directory into the container's /app folder
     ports:
-      - "5000:5000"
+      - "5000"
 #      - "8000:8000" # Prometheus metrics port
     environment:
-      TELEGRAM_WEB_APP_URL: "https://t.me/tbotalgo_bot"
+      TELEGRAM_WEB_APP_URL: "https://uncheaply-unresounded-saul.ngrok-free.dev"
       ENCRYPTION_KEY: "jDvau9_2I9zMEPpm-wdYPvBWfIxqUQyGFnEProcaQ-g="
       ENCRYPTED_BROKER_USER: "gAAAAABonJ3Ss6l39bIASjFwxTfVbgdcTBKvkcvwmQN1taFR40qzYfKxfzSOhfAMXBrtnTegqtHVP6RqZcxxi7kcyCSX5rYe-A=="
       ENCRYPTED_BROKER_PASS: "gAAAAABonJ8BYK9zHfWeiutwing-tp8ZUVyOr_A1Jn957DqQKas3JusbKcdtso4Ji8t7NagFXyIRLdGZIg9mUxcnFe2Z0cEipg=="

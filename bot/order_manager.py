@@ -4,6 +4,7 @@ from datetime import datetime
 from postgresql_client import PostgreSQLConnector
 import os
 from telegram_notifier import TelegramNotifier
+from market_data_config import MARKET_HOURS
 
 TRADES_TABLE = 'trades'
 
@@ -44,6 +45,13 @@ class OrderManager:
             logging.error(f"Invalid order_type: {order_type}")
             return
 
+        # --- Compliance Check: Market Hours ---
+        if not self.is_trading_hours_allowed(symbol):
+            message = f"Compliance: Market order for {symbol} rejected. Outside defined trading hours."
+            logging.warning(message)
+            self.notifier.send_message(f"⚠️ {message}")
+            return
+
         position_id = str(uuid.uuid4())
 
         # Delegate the actual order placement to the broker
@@ -77,12 +85,163 @@ class OrderManager:
             logging.error(f"OrderManager failed to place order: {message}")
             self.notifier.send_message(f"❌ **Trade Failed** ({symbol})\nReason: {message}")
 
+    def place_limit_order(self, symbol, volume, price, stop_loss, take_profit):
+        # --- Compliance Check: Market Hours ---
+        if not self.is_trading_hours_allowed(symbol):
+            message = f"Compliance: Limit order for {symbol} rejected. Outside defined trading hours."
+            logging.warning(message)
+            self.notifier.send_message(f"⚠️ {message}")
+            return
+
+        position_id = str(uuid.uuid4())
+
+        # Delegate the actual order placement to the broker
+        success, message = self.broker.place_order(
+            symbol=symbol,
+            order_type='BUY_LIMIT' if volume > 0 else 'SELL_LIMIT', # Assuming volume sign indicates direction
+            volume=abs(volume),
+            price=price,
+            sl=stop_loss,
+            tp=take_profit,
+            position_id=position_id
+        )
+
+        if success:
+            position_data = {
+                "position_id": position_id,
+                "symbol": symbol,
+                "order_type": 'BUY_LIMIT' if volume > 0 else 'SELL_LIMIT',
+                "volume": abs(volume),
+                "entry_price": price,
+                "stop_loss": stop_loss,
+                "take_profit": take_profit,
+                "status": "pending" # Limit orders are pending until filled
+            }
+            self._save_position_to_db(position_data)
+            logging.info(f"OrderManager now tracking new pending limit order {position_id}.")
+            self.notifier.send_message(f"✅ **Limit Order Placed** ({symbol})\nType: {'BUY_LIMIT' if volume > 0 else 'SELL_LIMIT'}\nVolume: {abs(volume)}\nPrice: {price}")
+        else:
+            logging.error(f"OrderManager failed to place limit order: {message}")
+            self.notifier.send_message(f"❌ **Limit Order Failed** ({symbol})\nReason: {message}")
+
+    def place_stop_order(self, symbol, volume, price, stop_loss, take_profit):
+        # --- Compliance Check: Market Hours ---
+        if not self.is_trading_hours_allowed(symbol):
+            message = f"Compliance: Stop order for {symbol} rejected. Outside defined trading hours."
+            logging.warning(message)
+            self.notifier.send_message(f"⚠️ {message}")
+            return
+
+        position_id = str(uuid.uuid4())
+
+        # Delegate the actual order placement to the broker
+        success, message = self.broker.place_order(
+            symbol=symbol,
+            order_type='BUY_STOP' if volume > 0 else 'SELL_STOP', # Assuming volume sign indicates direction
+            volume=abs(volume),
+            price=price,
+            sl=stop_loss,
+            tp=take_profit,
+            position_id=position_id
+        )
+
+        if success:
+            position_data = {
+                "position_id": position_id,
+                "symbol": symbol,
+                "order_type": 'BUY_STOP' if volume > 0 else 'SELL_STOP',
+                "volume": abs(volume),
+                "entry_price": price,
+                "stop_loss": stop_loss,
+                "take_profit": take_profit,
+                "status": "pending" # Stop orders are pending until triggered
+            }
+            self._save_position_to_db(position_data)
+            logging.info(f"OrderManager now tracking new pending stop order {position_id}.")
+            self.notifier.send_message(f"✅ **Stop Order Placed** ({symbol})\nType: {'BUY_STOP' if volume > 0 else 'SELL_STOP'}\nVolume: {abs(volume)}\nPrice: {price}")
+        else:
+            logging.error(f"OrderManager failed to place stop order: {message}")
+            self.notifier.send_message(f"❌ **Stop Order Failed** ({symbol})\nReason: {message}")
+        # --- Compliance Check: Market Hours ---
+        if not self.is_trading_hours_allowed(symbol):
+            message = f"Compliance: Limit order for {symbol} rejected. Outside defined trading hours."
+            logging.warning(message)
+            self.notifier.send_message(f"⚠️ {message}")
+            return
+
+        position_id = str(uuid.uuid4())
+
+        # Delegate the actual order placement to the broker
+        success, message = self.broker.place_order(
+            symbol=symbol,
+            order_type='BUY_LIMIT' if volume > 0 else 'SELL_LIMIT', # Assuming volume sign indicates direction
+            volume=abs(volume),
+            price=price,
+            sl=stop_loss,
+            tp=take_profit,
+            position_id=position_id
+        )
+
+        if success:
+            position_data = {
+                "position_id": position_id,
+                "symbol": symbol,
+                "order_type": 'BUY_LIMIT' if volume > 0 else 'SELL_LIMIT',
+                "volume": abs(volume),
+                "entry_price": price,
+                "stop_loss": stop_loss,
+                "take_profit": take_profit,
+                "status": "pending" # Limit orders are pending until filled
+            }
+            self._save_position_to_db(position_data)
+            logging.info(f"OrderManager now tracking new pending limit order {position_id}.")
+            self.notifier.send_message(f"✅ **Limit Order Placed** ({symbol})\nType: {'BUY_LIMIT' if volume > 0 else 'SELL_LIMIT'}\nVolume: {abs(volume)}\nPrice: {price}")
+        else:
+            logging.error(f"OrderManager failed to place limit order: {message}")
+            self.notifier.send_message(f"❌ **Limit Order Failed** ({symbol})\nReason: {message}")
+
     def get_open_positions(self):
         return {pid: pos for pid, pos in self.open_positions.items() if pos['status'] == 'open'}
 
     def close(self):
         if self.pg_connector:
             self.pg_connector.close()
+
+    def is_trading_hours_allowed(self, symbol, current_time=None):
+        """
+        Checks if trading is allowed for a given symbol at the current time (UTC).
+        :param symbol: The trading symbol (e.g., 'EURUSD').
+        :param current_time: Optional datetime object. If None, datetime.utcnow() is used.
+        :return: True if trading is allowed, False otherwise.
+        """
+        if symbol not in MARKET_HOURS:
+            logging.warning(f"Market hours not defined for symbol {symbol}. Assuming trading is allowed.")
+            return True
+
+        if current_time is None:
+            current_time = datetime.utcnow()
+
+        current_day_of_week = current_time.weekday() # Monday is 0, Sunday is 6
+        current_hour = current_time.hour
+        current_minute = current_time.minute
+
+        allowed_intervals = MARKET_HOURS.get(symbol, [])
+
+        for day, start_time, end_time in allowed_intervals:
+            if current_day_of_week == day:
+                start_hour, start_minute = start_time
+                end_hour, end_minute = end_time
+
+                # Convert current time and intervals to minutes for easier comparison
+                current_total_minutes = current_hour * 60 + current_minute
+                start_total_minutes = start_hour * 60 + start_minute
+                end_total_minutes = end_hour * 60 + end_minute
+
+                if start_total_minutes <= current_total_minutes <= end_total_minutes:
+                    return True
+        
+        logging.warning(f"Trading for {symbol} is currently outside defined market hours (UTC: {current_time.strftime('%Y-%m-%d %H:%M')}).")
+        return False
 
     # --- Database Persistence Methods ---
 

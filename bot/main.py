@@ -26,6 +26,7 @@ from optimization_config import STRATEGY_MAP, PARAM_GRIDS
 from genetic_algorithm import GeneticAlgorithm
 from capital_allocator import CapitalAllocator
 from telegram_interface import TelegramInterface
+from leader_election import LeaderElection
 
 # Prometheus Metrics
 MESSAGES_SENT = Counter('bot_messages_sent_total', 'Total number of messages sent by the bot')
@@ -1053,42 +1054,65 @@ def main():
     
 
     elif args.command == "start-trading-session":
-        # The 'strategy' argument is now obsolete. The StrategySelector handles this.
-        logger.info(f"Starting dynamic trading session for {args.symbol}")
+        logger.info("Initiating leader election process for trading session...")
 
-        # The correlation window is still needed for the MarketContextAnalyzer,
-        # so we retrieve it if the secondary symbol is provided.
-        correlation_window_minutes = None
-        if args.secondary_symbol:
-            if not args.correlation_window_minutes:
-                logger.error("Intermarket analysis requires a correlation window. Use --correlation-window-minutes (e.g., 60).")
-                return
-            correlation_window_minutes = args.correlation_window_minutes
-            logger.info(f"Using correlation window: {correlation_window_minutes} minutes for intermarket analysis.")
-
-        # Initialize CapitalAllocator
-        capital_allocator = CapitalAllocator()
-
-        consumer = Consumer(
-            host=BROKER_HOST,
-            port=BROKER_PORT,
-            username=BROKER_USER,
-            password=BROKER_PASS,
-            symbol=args.symbol,
-            broker=broker,  # Pass the selected broker
-            capital_allocator=capital_allocator, # Pass the capital allocator
-            secondary_symbol=args.secondary_symbol,
-            correlation_window_minutes=correlation_window_minutes,
-            quiet_period_before_minutes=args.quiet_period_before_minutes,
-            quiet_period_after_minutes=args.quiet_period_after_minutes,
-            candle_interval_minutes=args.candle_interval_minutes
+        # --- Leader Election Setup ---
+        pg_connector = PostgreSQLConnector(
+            dbname=PG_DBNAME,
+            user=PG_USER,
+            password=PG_PASSWORD,
+            host=PG_HOST,
+            port=PG_PORT
         )
+        leader_election = LeaderElection(pg_connector)
 
-        # Update the selector's allocator after consumer is created
-        consumer.strategy_selector.capital_allocator = capital_allocator
+        try:
+            while True:  # Main loop to handle promotion from follower to leader
+                if leader_election.attempt_to_become_leader():
+                    # --- LEADER LOGIC ---
+                    logger.info("This instance is the LEADER. Starting trading session.")
+                    leader_election.start_heartbeat()
 
-        consumer.connect()
-        consumer.start_consuming("realtime_data")
+                    # Initialize CapitalAllocator
+                    capital_allocator = CapitalAllocator()
+
+                    consumer = Consumer(
+                        host=BROKER_HOST,
+                        port=BROKER_PORT,
+                        username=BROKER_USER,
+                        password=BROKER_PASS,
+                        symbol=args.symbol,
+                        broker=broker,
+                        capital_allocator=capital_allocator,
+                        secondary_symbol=args.secondary_symbol,
+                        correlation_window_minutes=args.correlation_window_minutes,
+                        quiet_period_before_minutes=args.quiet_period_before_minutes,
+                        quiet_period_after_minutes=args.quiet_period_after_minutes,
+                        candle_interval_minutes=args.candle_interval_minutes
+                    )
+                    consumer.strategy_selector.capital_allocator = capital_allocator
+                    
+                    try:
+                        consumer.connect()
+                        # This is a blocking call. The bot will trade here until it's stopped or crashes.
+                        consumer.start_consuming("realtime_data")
+                    except Exception as e:
+                        logger.critical(f"Trading session (leader) crashed with error: {e}", exc_info=True)
+                    
+                    # If the consumer stops for any reason (crash or graceful), the loop will restart.
+                    logger.warning("Trading session stopped. Re-evaluating leader status in 10 seconds...")
+                    time.sleep(10)
+
+                else:
+                    # --- FOLLOWER LOGIC ---
+                    logger.info("This instance is a FOLLOWER. Monitoring leader...")
+                    leader_election.monitor_leader()
+                    # If monitor_leader() returns, it means the leader is down and this instance
+                    # should now attempt to become the leader. The loop will restart.
+                    logger.info("Leader appears to be down. Attempting to get promoted to leader...")
+        finally:
+            # Ensure the lock is released when the process exits.
+            leader_election.release_lock()
 
     elif args.command == "fetch-economic-events":
         logger.info(f"Executing fetch-economic-events command for the next {args.days} days...")

@@ -310,61 +310,17 @@ class TelegramInterface:
             except Exception as e:
                 logging.error(f"Error sending message to RabbitMQ: {e}")
                 self.send_message(f"❌ Failed to send message: `{e}`", reply_markup=self.main_menu_keyboard)
-        elif command_text.startswith("/trade"):
-            parts = command_text.split()
-            usage = "Usage: `/trade <symbol> <volume> <buy/sell> <sl_price> <tp_price>`"
-            if len(parts) != 6:
-                self.send_message(usage)
-                return
-
-            try:
-                _, symbol, volume_str, order_type, sl_str, tp_str = parts
-                volume = float(volume_str)
-                sl_price = float(sl_str)
-                tp_price = float(tp_str)
-                order_type = order_type.lower()
-
-                if order_type not in ['buy', 'sell']:
-                    raise ValueError("Order type must be 'buy' or 'sell'.")
-                if volume <= 0 or sl_price <= 0 or tp_price <= 0:
-                    raise ValueError("Volume and prices must be positive numbers.")
-
-            except ValueError as e:
-                self.send_message(f"Invalid arguments. {e}\n{usage}")
-                return
-
-            # Create confirmation prompt
-            confirmation_text = (
-                f"*Confirm Trade*\n\n"
-                f"Symbol: `{symbol.upper()}`\n"
-                f"Volume: `{volume}`\n"
-                f"Type: `{order_type.upper()}`\n"
-                f"SL: `{sl_price}`\n"
-                f"TP: `{tp_price}`\n\n"
-                f"Please confirm to place the trade."
-            )
-
-            # Encode trade details into callback data
-            callback_data = f"trade_confirm:{symbol}:{volume}:{order_type}:{sl_price}:{tp_price}"
-            
-            # Truncate callback_data if it's too long for Telegram API
-            if len(callback_data.encode('utf-8')) > 64:
-                self.send_message("❌ Trade details are too long for a callback. Please use shorter values.")
-                return
-
-            inline_keyboard = {
-                "inline_keyboard": [
-                    [
-                        {"text": "✅ Confirm", "callback_data": callback_data},
-                        {"text": "❌ Cancel", "callback_data": "cancel_trade"}
-                    ]
-                ]
-            }
-            self.send_message(confirmation_text, reply_markup=inline_keyboard)
-
         elif command_text == "/webapp":
-            # URL is read from an environment variable for production configuration.
-            web_app_url = os.getenv("TELEGRAM_WEB_APP_URL", "https://<FALLBACK_URL_REPLACE_ME>")
+            web_app_url = os.getenv("TELEGRAM_WEB_APP_URL")
+
+            if not web_app_url or not web_app_url.startswith("https://"):
+                error_text = (
+                    "*Configuration Error*\n\n"
+                    "The `TELEGRAM_WEB_APP_URL` is not configured correctly. "
+                    "Please ensure it is set in your `.env` file and starts with `https://`."
+                )
+                self.send_message(error_text)
+                return
 
             reply_text = "Click the button below to open the web interface inside Telegram:"
             keyboard = {
@@ -375,6 +331,7 @@ class TelegramInterface:
                 ]
             }
             self.send_message(reply_text, reply_markup=keyboard)
+
 
 
         else:
@@ -526,6 +483,37 @@ class TelegramInterface:
         except requests.exceptions.RequestException as e:
             logging.error(f"Error answering callback query: {e}")
 
+    def handle_web_app_data(self, web_app_data):
+        """Handles data received from the Web App."""
+        logging.info(f"Received web app data: {web_app_data['data']}")
+        try:
+            data = json.loads(web_app_data['data'])
+            command = data.get('command')
+
+            if command == 'send_message':
+                message_text = data.get('text', '')
+                if message_text:
+                    # For now, let's assume a default queue 'telegram_messages'
+                    queue_name = 'telegram_messages'
+                    try:
+                        publisher = Publisher(os.getenv("BROKER_HOST"), 5672, self.broker_user, self.broker_pass)
+                        publisher.connect()
+                        publisher.publish_message(queue_name, message_text)
+                        publisher.close()
+                        self.send_message(f"✅ Message from Web App sent to queue `{queue_name}`: `{message_text}`")
+                    except Exception as e:
+                        logging.error(f"Error sending message from web app to RabbitMQ: {e}")
+                        self.send_message(f"❌ Failed to send message from Web App: `{e}`")
+            else:
+                self.send_message(f"Unknown command from Web App: {command}")
+
+        except json.JSONDecodeError:
+            logging.error("Failed to decode JSON from web app data.")
+            self.send_message("Received malformed data from the Web App.")
+        except Exception as e:
+            logging.error(f"An error occurred in handle_web_app_data: {e}")
+            self.send_message("An unexpected error occurred while processing data from the Web App.")
+
     def run(self):
         """Main loop to poll for and handle commands."""
         if self.last_update_id == 0:
@@ -540,13 +528,15 @@ class TelegramInterface:
             updates = self.get_updates(self.last_update_id)
             for update in updates:
                 self.last_update_id = update['update_id'] + 1
-                if 'message' in update and 'text' in update['message']:
+                if 'message' in update:
                     message = update['message']
-                    # Only process messages from the configured user
                     if str(message['chat']['id']) == self.chat_id:
-                        text = message['text']
-                        if text.startswith('/'):
-                            self.handle_command(text)
+                        # Handle regular text commands
+                        if 'text' in message and message['text'].startswith('/'):
+                            self.handle_command(message['text'])
+                        # Handle data from Web App
+                        elif 'web_app_data' in message:
+                            self.handle_web_app_data(message['web_app_data'])
                 elif 'callback_query' in update:
                     callback_query = update['callback_query']
                     if str(callback_query['from']['id']) == self.chat_id:

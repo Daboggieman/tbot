@@ -10,7 +10,6 @@ from postgresql_client import PostgreSQLConnector
 from economic_calendar import get_economic_events
 
 app = Flask(__name__)
-app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev_secret_key_for_testing_only")
 
 # Global dictionary to hold the latest market data for each symbol
 latest_market_data = {}
@@ -46,39 +45,16 @@ except (ValueError, TypeError, AttributeError) as e:
     # but it will likely fail on subsequent operations.
     pass
 
-# Dummy user data for demonstration
-USERS = {
-    "admin": "adminpass",
-    "user": "userpass"
-}
+
 
 @app.route('/')
 def index():
-    if 'username' not in session:
-        return redirect(url_for('login'))
-    return render_template('index.html', username=session['username'])
+    return render_template('index.html')
 
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    if request.method == 'POST':
-        username = request.form['username']
-        password = request.form['password']
-        if username in USERS and USERS[username] == password:
-            session['username'] = username
-            return redirect(url_for('index'))
-        else:
-            return render_template('login.html', error="Invalid credentials")
-    return render_template('login.html')
 
-@app.route('/logout')
-def logout():
-    session.pop('username', None)
-    return redirect(url_for('index'))
 
 @app.route('/status')
 def status_page():
-    if 'username' not in session:
-        return redirect(url_for('login'))
     
     status_info = {}
 
@@ -118,12 +94,10 @@ def status_page():
     except Exception as e:
         status_info['postgresql'] = f"Connection failed"
         
-    return render_template('status.html', username=session['username'], status=status_info)
+    return render_template('status.html', status=status_info)
 
 @app.route('/api/status')
 def api_status():
-    if 'username' not in session:
-        return jsonify({"error": "Unauthorized"}), 401
 
     status_info = {}
 
@@ -167,8 +141,6 @@ def api_status():
 
 @app.route('/api/economic-events')
 def api_economic_events():
-    if 'username' not in session:
-        return jsonify({"error": "Unauthorized"}), 401
     
     try:
         events_df = get_economic_events(days_ahead=7)
@@ -185,8 +157,6 @@ def api_economic_events():
 
 @app.route('/api/open-positions')
 def api_open_positions():
-    if 'username' not in session:
-        return jsonify({"error": "Unauthorized"}), 401
     
     try:
         pg_connector = PostgreSQLConnector(
@@ -225,8 +195,6 @@ def api_open_positions():
 
 @app.route('/send_message', methods=['GET', 'POST'])
 def send_message():
-    if 'username' not in session:
-        return redirect(url_for('login'))
 
     message_status = None
     if request.method == 'POST':
@@ -240,7 +208,7 @@ def send_message():
         except Exception as e:
             message_status = f"Failed to send message: {e}"
 
-    return render_template('send_message.html', message_status=message_status, username=session['username'])
+    return render_template('send_message.html', message_status=message_status)
 
 
 

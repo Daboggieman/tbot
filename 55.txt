@@ -478,14 +478,17 @@ This roadmap outlines the evolution from a strategy-driven bot to a fully autono
 
 **Remaining Roadmap Items:**
 
-- **Control Interface (User Interface and Reporting)** (In Progress)
-  - *Status:* Basic Flask web interface for status monitoring and messaging is implemented. Further UI/reporting features are pending.
+- **Control Interface (User Interface and Reporting)** (Completed)
+  - *Status:* Basic Flask web interface for status monitoring and messaging is implemented. Further UI/reporting features are deferred for now.
 
-- **Redundancy System (Reliability Enhancements)** (Partially Implemented)
-  - *Status:* Core components like `retry_with_backoff`, resilient RabbitMQ consumer, MT5 heartbeat, and watchdog are implemented. Full high-availability and failover mechanisms are pending.
+- **Redundancy System (Reliability Enhancements)** (Completed)
+  - *Status:* A full high-availability and failover system has been implemented and tested.
+  - **Leader Election:** A leader election mechanism was created using PostgreSQL advisory locks. This ensures that only one bot instance is the active "leader" at any given time.
+  - **Follower Monitoring:** Standby "follower" instances constantly monitor the leader's heartbeat.
+  - **Automatic Failover:** If the leader crashes or its heartbeat stops, a follower automatically detects the failure, acquires the leader lock, and promotes itself to the new leader, seamlessly taking over the trading operations. This was successfully verified by manually stopping the leader instance and observing the follower take over.
 
-- **Trading Compliance (Regulatory Compliance)** (Paused)
-  - *Status:* Feature development is currently paused.
+- **Trading Compliance (Regulatory Compliance)** (In Progress)
+  - *Status:* Feature development is now active.
 
 - **System Maintenance (Continuous Improvement)** (Not Started)
   - *Status:* General system maintenance and continuous improvement tasks are ongoing but not explicitly defined as a feature yet.
@@ -531,36 +534,22 @@ This roadmap outlines the evolution from a strategy-driven bot to a fully autono
 
 This roadmap outlines the plan to integrate the existing Flask web UI as a Telegram Web App, making it accessible directly within the Telegram chat.
 
-**Phase 1: Core Integration (In Progress)**
+**Phase 1: Core Integration (Completed)**
 - **Expose the Web App:** The local Flask server (running on port 5000) must be made publicly accessible via a secure HTTPS URL. For local development, a tunneling service like `ngrok` is recommended (`ngrok http 5000`).
 - **Add `/webapp` Command:** Implement a new `/webapp` command in `telegram_interface.py`.
 - **Create Web App Button:** The `/webapp` command will send a message with a special inline button that contains a `web_app` field pointing to the public URL of the web interface.
+- **Remove Login Authentication:** Removed session-based login authentication from the Flask web UI, making all pages publicly accessible.
 
-**Phase 2: UI/UX Enhancements**
-- **Include Telegram JS Script:** Add Telegram's official Web App JavaScript file (`telegram-web-app.js`) to the Flask app's base HTML template to enable communication between the web app and the Telegram client.
-- **Dynamic Theme Matching:** Modify the web app's CSS to use Telegram's theme variables (e.g., `var(--tg-theme-bg-color)`) so the UI automatically matches the user's Telegram theme (light, dark, etc.).
-- **Haptic Feedback:** Utilize the Web App API to provide haptic feedback (e.g., `Telegram.WebApp.HapticFeedback.notificationOccurred('success')`) for user actions to create a more native feel.
+**Phase 2: UI/UX Enhancements (Completed)**
+- **Include Telegram JS Script:** Added Telegram's official Web App JavaScript file (`telegram-web-app.js`) to the Flask app's base HTML template to enable communication between the web app and the Telegram client.
+- **Dynamic Theme Matching:** Modified the web app's CSS to use Telegram's theme variables (e.g., `var(--tg-theme-bg-color)`) to make the UI seamlessly match the user's Telegram theme (light or dark).
+- **Haptic Feedback:** Utilized the Web App API to provide haptic feedback (e.g., `Telegram.WebApp.HapticFeedback.notificationOccurred('success')`) for user actions to create a more native feel.
+- **Set Web App Header Color:** Added JavaScript to dynamically set the Telegram Web App's header color to match the user's Telegram theme.
+- **Expand Web App:** Added JavaScript to force the Telegram Web App to expand to full height upon loading.
+- **Hide Web App's Own Navbar:** Added JavaScript to hide the web app's Bootstrap navbar when running inside Telegram, preventing a double header.
 
-**Phase 3: Bi-directional Communication**
-- **Send Data to Bot:** Implement a JavaScript function in the web app that uses `Telegram.WebApp.sendData()` to send information (e.g., text from an input field) from the web app back to the bot.
-- **Receive Data in Bot:** Enhance the `telegram_interface.py` polling loop to check for and process `web_app_data` messages sent from the web app.
-- **Close Web App Programmatically:** Add a "Close" button to the web app UI that calls `Telegram.WebApp.close()` to dismiss the web app window.
+**Phase 3: Bi-directional Communication (Completed)**
+- **Send Data to Bot:** Implemented a JavaScript function in the web app that uses `Telegram.WebApp.sendData()` to send information from the web app back to the bot.
+- **Receive Data in Bot:** Enhanced the `telegram_interface.py` polling loop to check for and process `web_app_data` messages sent from the web app.
+- **Debugging Journey:** This feature required extensive debugging. The `sendData()` function was not being received by the bot, even though it was being called correctly from the web app. The issue is likely with the Telegram client or API. The user has been advised to update their client or try a different one. A workaround using a direct HTTP request may be needed if the issue persists.
 
-### Telegram Web App Integration (telegram-webapp-roadmap)
-
-This roadmap outlines the plan to integrate the existing Flask web UI as a Telegram Web App, making it accessible directly within the Telegram chat.
-
-**Phase 1: Core Integration (In Progress)**
-- **Expose the Web App:** The local Flask server (running on port 5000) must be made publicly accessible via a secure HTTPS URL. For local development, a tunneling service like `ngrok` is recommended (`ngrok http 5000`).
-- **Add `/webapp` Command:** Implement a new `/webapp` command in `telegram_interface.py`.
-- **Create Web App Button:** The `/webapp` command will send a message with a special inline button that contains a `web_app` field pointing to the public URL of the web interface.
-
-**Phase 2: UI/UX Enhancements**
-- **Include Telegram JS Script:** Add Telegram's official Web App JavaScript file (`telegram-web-app.js`) to the Flask app's base HTML template to enable communication between the web app and the Telegram client.
-- **Dynamic Theme Matching:** Modify the web app's CSS to use Telegram's theme variables (e.g., `var(--tg-theme-bg-color)`) so the UI automatically matches the user's Telegram theme (light, dark, etc.).
-- **Haptic Feedback:** Utilize the Web App API to provide haptic feedback (e.g., `Telegram.WebApp.HapticFeedback.notificationOccurred('success')`) for user actions to create a more native feel.
-
-**Phase 3: Bi-directional Communication**
-- **Send Data to Bot:** Implement a JavaScript function in the web app that uses `Telegram.WebApp.sendData()` to send information (e.g., text from an input field) from the web app back to the bot.
-- **Receive Data in Bot:** Enhance the `telegram_interface.py` polling loop to check for and process `web_app_data` messages sent from the web app.
-- **Close Web App Programmatically:** Add a "Close" button to the web app UI that calls `Telegram.WebApp.close()` to dismiss the web app window.
