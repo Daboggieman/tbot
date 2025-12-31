@@ -97,7 +97,7 @@ class Consumer:
 
         # Request account info on startup
         self.order_manager.request_account_info()
-        self.notifier.send_message(f"✅ **Consumer Initialized**\nSymbol: {self.symbol}\nMode: {self.broker.mode}")
+        self.notifier.send_message(f"**Consumer Initialized**\nSymbol: {self.symbol}\nMode: {self.broker.mode}")
 
 
     def _get_timeframe_string(self):
@@ -185,7 +185,7 @@ class Consumer:
         self.connection = pika.BlockingConnection(parameters)
         self.channel = self.connection.channel()
         logging.info("Consumer connected to RabbitMQ successfully.")
-        self.notifier.send_message("✅ Consumer connected to RabbitMQ successfully.")
+        self.notifier.send_message("Consumer connected to RabbitMQ successfully.")
 
     def _load_economic_events(self):
         """Fetches and stores high-impact economic events for the next 7 days."""
