@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+
+{% block title %}Service Status{% endblock %}
+
+{% block content %}
+    <h2>Service Status</h2>
+    <ul>
+        {% for service, status_msg in status.items() %}
+            <li><strong>{{ service | capitalize }}:</strong> {{ status_msg }}</li>
+        {% endfor %}
+    </ul>
+
+
+{% endblock %}

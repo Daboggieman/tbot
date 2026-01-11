@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}Send Message{% endblock %}
+
+{% block content %}
+    <h2>Send Message</h2>
+    {% if message_status %}
+        <p class="message success">{{ message_status }}</p>
+    {% endif %}
+    <form id="messageForm" onsubmit="return false;">
+        <div class="mb-3">
+            <label for="message" class="form-label">Message:</label>
+            <textarea class="form-control" id="message" name="message" rows="3" required></textarea>
+        </div>
+    </form>
+
+    <script>
+        window.onload = function() {
+            alert("window.onload executed!"); // For debugging
+            let tg = window.Telegram.WebApp;
+
+            // --- Main Button Setup ---
+            tg.MainButton.setText('Send Message');
+            tg.MainButton.show();
+
+            // --- Event Handler for Main Button ---
+            tg.MainButton.onClick(function() {
+                const messageInput = document.getElementById('message');
+                const messageText = messageInput.value;
+
+                if (messageText.trim() !== '') {
+                    // Show loader on the main button
+                    tg.MainButton.showProgress();
+
+                    // Send data to the bot
+                    tg.sendData(JSON.stringify({ command: 'send_message', text: messageText }));
+
+                    messageInput.value = '';
+                    triggerHapticFeedback('success');
+                    
+                    setTimeout(function() {
+                        tg.MainButton.hideProgress();
+                    }, 500);
+
+                } else {
+                    triggerHapticFeedback('warning');
+                    alert('Message cannot be empty!');
+                }
+            });
+        };
+    </script>
+{% endblock %}

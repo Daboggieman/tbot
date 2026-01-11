@@ -1,0 +1,555 @@
+**Command Library**
+
+This library documents the common commands used for running and interacting with the trading bot project.
+
+**Run Directory:** All commands should be executed from the project root directory: `C:\Users\EXT-PC\tbot`
+
+---
+
+
+### Docker & System Management
+
+These commands are for managing the Docker containers and the overall application lifecycle.
+
+- **`docker-compose up --build`**
+  - **Definition:** Builds (or rebuilds) the Docker images from the `Dockerfile` and then starts all services.
+  - **Usage:** Only use this when you have changed a configuration file like `docker-compose.yml`, `Dockerfile`, or when adding a new dependency to `requirements.txt`.
+
+- **`docker-compose up -d`**
+  - **Definition:** Starts all services in detached mode (runs in the background). If containers already exist, it will recreate them to apply new code changes.
+  - **Usage:** Use this after making changes to the Python source code (`.py` files). It will quickly restart the containers to apply your changes.
+
+- **`docker-compose logs`**
+  - **Definition:** Displays the logs from all running services.
+  - **Usage:** Good for seeing a snapshot of recent activity.
+
+- **`docker-compose logs -f bot`**
+  - **Definition:** Shows the live, streaming logs specifically for the `bot` service.
+  - **Usage:** Useful for watching the real-time output of the bot after it has been started with `docker-compose up -d`.
+
+- **`docker-compose exec bot <command>`**
+  - **Definition:** Executes a single command inside the already running `bot` container.
+  - **Usage:** This is the primary way we interact with the bot's command-line interface (CLI).
+
+- **`docker-compose exec bot bash`**
+  - **Definition:** Opens an interactive `bash` shell inside the `bot` container.
+  - **Usage:** For advanced debugging or running multiple commands inside the container without repeatedly typing `docker-compose exec`.
+
+- **`docker-compose down`**
+  - **Definition:** Stops and removes all containers, networks, and volumes defined in the `docker-compose.yml` file.
+  - **Usage:** Use this to completely clean up the environment. **Warning:** This will delete all data in your databases unless you have configured persistent volumes outside of Docker's default management.
+
+---
+
+
+### Host Machine Commands
+
+These commands should be run on your host machine (your computer), not inside the Docker container.
+
+- **`python historical_data_importer.py <symbol> <timeframe> <start_date> <end_date>`**
+  - **Definition:** Connects to your MT5 terminal to download historical data and saves it as a CSV file for the bot to use in backtesting.
+  - **Example:** `python historical_data_importer.py EURUSD D1 2023-01-01 2023-12-31`
+
+- **`python mt5_bridge.py <symbol1> <symbol2> ...`**
+  - **Definition:** Connects to your MT5 terminal and starts publishing a live data feed for one or more symbols to the RabbitMQ message queue.
+  - **Example:** `python mt5_bridge.py EURUSD XAUUSD`
+
+---
+
+
+### Application CLI Commands
+
+These are the specific commands available within the bot's application, run via `docker-compose exec bot python main.py <command>`.
+
+- **`start-web`**
+  - **Definition:** Starts the Flask web server and the Prometheus metrics endpoint.
+
+- **`status`**
+  - **Definition:** Checks and displays the connection status of the required services (RabbitMQ, InfluxDB, PostgreSQL).
+
+- **`market-order <symbol> <volume> <requested_price> <sl> <tp> <slippage> <max_spread>`**
+  - **Definition:** Places a simulated market order with slippage and spread control.
+
+- **`limit-order <symbol> <volume> <price> <sl> <tp>`**
+  - **Definition:** Places a simulated limit order.
+
+- **`stop-order <symbol> <volume> <price> <sl> <tp>`**
+  - **Definition:** Places a simulated stop order.
+
+- **`twap-order <symbol> <total_volume> <duration_seconds> <num_chunks> <requested_price> <sl> <tp> <slippage> <max_spread>`**
+  - **Definition:** Executes a Time-Weighted Average Price (TWAP) order.
+
+- **`vwap-order <symbol> <total_volume> <duration_seconds> <num_chunks> <slippage> <max_spread>`**
+  - **Definition:** Executes a Volume-Weighted Average Price (VWAP) order.
+
+- **`partial-exit <position_id> <percentage_to_close> <current_price>`**
+  - **Definition:** Manages a partial exit for an open position.
+
+- **`trailing-stop <position_id> <current_price> <entry_price> <current_stop_loss> <trailing_step_points>`**
+  - **Definition:** Manages a trailing stop-loss for an open position.
+
+- **`time-based-exit <position_id> <reason>`**
+  - **Definition:** Manages a time-based exit for an open position.
+
+- **`adjust-sl-volatility <position_id> <current_price> <entry_price> <current_stop_loss> <atr_value> [--atr_multiplier <value>]`**
+  - **Definition:** Adjusts stop-loss based on volatility (e.g., ATR).
+
+- **`simulate-broker-connection <broker_id>`**
+  - **Definition:** Simulates connection to a broker.
+
+- **`simulate-heartbeat <broker_id>`**
+  - **Definition:** Simulates heartbeat monitoring for a broker API.
+
+- **`reconnect-with-backoff <broker_id> [--max-retries <value>] [--initial-delay <value>]`**
+  - **Definition:** Attempts to reconnect to a broker with exponential backoff.
+
+- **`manage-session-token [--broker-id <value>] [--current-token-status <value>]`**
+  - **Definition:** Simulates managing a session token for a broker.
+
+- **`reconcile-orders [--broker-id <value>]`**
+  - **Definition:** Simulates reconciling order state with a broker.
+
+- **`calculate-position-size <symbol> <account_balance> <risk_per_trade_percent> <atr_value> [--atr-multiplier <value>]`**
+  - **Definition:** Calculates dynamic position size based on volatility and risk.
+
+- **`adjust-position-account <current_account_equity> <initial_account_balance> <max_drawdown_percent> <current_position_size>`**
+  - **Definition:** Adjusts position size based on account performance and drawdown.
+
+- **`manage-risk <current_portfolio_value> <max_exposure_percent> [--stress-test-scenario <value>]`**
+  - **Definition:** Manages comprehensive trading risk.
+
+- **`drawdown-protection <current_account_equity> <initial_account_balance> <daily_drawdown_limit_percent> <total_drawdown_limit_percent>`**
+  - **Definition:** Implements drawdown protection mechanisms.
+
+- **`manage-profit-targets <position_id> <current_price> <entry_price> <profit_target_percent> <trailing_profit_target_percent>`**
+  - **Definition:** Manages profit targets for an open position.
+
+- **`track-performance`**
+  - **Definition:** Tracks and reports on the performance of a series of closed trades.
+
+- **`calculate-signal-strength <symbol>`**
+  - **Definition:** Calculates a signal strength score for a given symbol.
+
+- **`detect-market-regime <symbol>`**
+  - **Definition:** Detects the market regime for a given symbol.
+
+- **`adjust-parameters-for-volatility <symbol> <market_regime>`**
+  - **Definition:** Adjusts trading parameters based on market volatility.
+
+- **`generate-seasonality-aware-signal <symbol> <current_time>`**
+  - **Definition:** Generates a trading signal that is aware of market seasonality.
+
+- **`get-instrument-profile <symbol>`**
+  - **Definition:** Gets the customized instrument profile for a given symbol.
+
+- **`normalize-volatility`**
+  - **Definition:** Normalizes volatility across different assets.
+
+- **`adjust-position-size-for-liquidity <symbol> <base_position_size>`**
+  - **Definition:** Adjusts position size based on liquidity.
+
+- **`check-trading-hours <symbol> [--time <value>]`**
+  - **Definition:** Checks if trading is allowed for a given symbol at a specific time.
+
+- **`download-historical-data <symbol> <timeframe> <start_date> <end_date>`**
+  - **Definition:** Instructs the user to run the `historical_data_importer.py` script on their host machine.
+
+- **`fetch-news <symbol> <start_date> <end_date>`**
+  - **Definition:** Fetches news and analyzes sentiment for a symbol.
+
+- **`fetch-economic-events [--days <days>]`**
+  - **Definition:** Fetches and displays upcoming economic events for the next number of days (default: 7).
+
+- **`backtest <strategy> <symbol> <timeframe> <start_date> <end_date> [--secondary-symbol <symbol>]`**
+  - **Definition:** Runs a backtest of a trading strategy. Can optionally include a secondary symbol for intermarket analysis.
+
+- **`backtest-event <symbol> <timeframe> <start_date> <end_date>`**
+  - **Definition:** Runs an event-driven backtest of a trading strategy.
+
+- **`backtest-pairs <strategy> <symbol_a> <symbol_b> <timeframe> <start_date> <end_date>`**
+  - **Definition:** Runs a backtest of a pairs trading strategy.
+
+- **`backtest-ml <symbol> <timeframe> <start_date> <end_date>`**
+  - **Definition:** Runs a backtest of a machine learning strategy.
+
+- **`analyze-performance`**
+  - **Definition:** Runs performance analytics on a set of trades.
+
+- **`optimize <strategy> <symbol> <timeframe> <start_date> <end_date>`**
+  - **Definition:** Runs a strategy optimization.
+
+- **`detect-patterns <symbol> <timeframe>`**
+  - **Definition:** Detects candlestick patterns in historical data.
+
+- **`plot-performance`**
+  - **Definition:** Plots the performance of a backtest from portfolio_history.csv.
+
+- **`discover-strategies <symbol> <timeframe> <start_date> <end_date> [--population] [--generations] ...`**
+  - **Definition:** Runs the genetic algorithm to discover new trading strategies.
+
+- **`retrain-ml-model <symbol> <timeframe> <start_date> <end_date>`**
+  - **Definition:** Retrains the machine learning model on new data.
+
+- **`send-message <message> [--loop]`**
+  - **Definition:** Sends a test message to the RabbitMQ queue.
+
+- **`send-influx-data <measurement>`**
+  - **Definition:** Sends continuous test data to InfluxDB.
+
+- **`send-pg-data <table>`**
+  - **Definition:** Sends continuous test records to PostgreSQL.
+
+- **`crash`**
+  - **Definition:** Intentionally crashes the bot to test the `restart: unless-stopped` policy.
+
+---
+
+**Prioritized Roadmap for Bot Implementation:**
+
+**Phase 1: Foundational Core (Completed)**
+- **Technical Foundation (Core Architecture)**
+- **Error Handling (Reliability Enhancements)**
+- **Access Control (System Security)**
+
+**Phase 2: Core Trading Functionality (Completed)**
+- **Smart Order Execution (Execution Optimization)**
+- **Broker Integration (Execution Optimization)**
+- **Dynamic Position Sizing (Risk Management System)**
+- **Comprehensive Risk Controls (Risk Management System)**
+- **Profit Management (Risk Management System)**
+
+**Phase 3: Market Analysis and Strategy Development (Completed)**
+- **Enhanced Signal Detection (Market Analysis Capabilities)**
+- **Asset-Specific Customization (Market Analysis Capabilities)**
+- **Strategy Development Framework (Continuous Improvement)**
+
+**Phase 4: Advanced Features and UI (Partially Implemented)**
+- **Advanced News Processing (News and Sentiment Analysis)** (Implemented)
+- **Sentiment Integration (News and Sentiment Analysis)** (Implemented)
+- **Live Broker Integration (MT5)** (Implemented)
+- **Intermarket Analysis (Market Context Analysis)** (Implemented)
+- **Economic Data Integration (Market Context Analysis)** (Implemented)
+- **Control Interface (User Interface and Reporting)** (In Progress)
+
+**Phase 5: Maintenance and Compliance (Partially Implemented)**
+- **Redundancy System (Reliability Enhancements)** (Partially Implemented)
+- **Trading Compliance (Regulatory Compliance)** (Paused)
+- **Documentation (Regulatory Compliance)** (Implemented)
+- **System Maintenance (Continuous Improvement)**
+
+**Implemented Features:**
+
+- **Technical Foundation (Core Architecture)**
+  - **Programming**: Python.
+  - **Architecture**: Modular design with components for data management, strategies, backtesting, etc.
+  - **Execution Environment**: Containerized deployment (Docker).
+  - **Database**: Time-series database (InfluxDB) and SQL (PostgreSQL).
+  - **Interface**: CLI and a basic Flask web interface.
+- **Error Handling (Reliability Enhancements)**
+  - Comprehensive logging system.
+- **Access Control (System Security)**
+  - Encryption for sensitive credentials.
+- **Smart Order Execution (Execution Optimization)**
+  - Market, limit, and stop orders.
+  - TWAP and VWAP orders.
+  - Partial exits and trailing stops.
+- **Broker Integration (Execution Optimization)**
+  - Simulated broker integration with connection management.
+- **Direct MT5 Trade Execution Bridge (Phase C)**
+  - The `OrderManager` was refactored to publish trade orders to a `trade_orders` RabbitMQ queue.
+  - Created a new host-side script, `mt5_order_executor.py`, which subscribes to the `trade_orders` queue.
+  - This executor script receives order messages and uses the `MetaTrader5` library to execute them directly in the terminal.
+  - Debugged and fixed multiple issues, including incorrect RabbitMQ credentials, a `TypeError` from incorrect strategy arguments, a `NameError` from a missing import, and an `Unsupported filling mode` error from MT5 by changing from IOC to FOK.
+  - The full end-to-end trade pipeline from signal generation in the bot to execution in MT5 is now complete and verified.
+- **Dynamic Position Sizing (Risk Management System)**
+  - Volatility-based and account-based position sizing.
+- **Comprehensive Risk Controls (Risk Management System)**
+  - Drawdown protection and comprehensive risk management.
+- **Profit Management (Risk Management System)**
+  - Profit target management and performance tracking.
+- **Enhanced Signal Detection (Market Analysis Capabilities)**
+  - Multi-factor signal strength, market regime detection, and seasonality-aware signals.
+- **Asset-Specific Customization (Market Analysis Capabilities)**
+  - Instrument profiles and liquidity-based adjustments.
+- **Strategy Development Framework (Continuous Improvement)**
+  - Backtesting engine (vectorized and event-driven).
+  - Strategy optimization suite.
+  - Performance analytics and visualization tools.
+- **Advanced News Processing (News and Sentiment Analysis)**
+  - News fetching and sentiment analysis.
+- **Sentiment Integration (News and Sentiment Analysis)**
+  - Created `RealtimeSentimentAwareMovingAverageCrossoverStrategy` to use sentiment in live trading.
+  - The `Consumer` now fetches live sentiment scores to use with sentiment-aware strategies.
+- **Live Broker Integration (MT5)**
+  - Replaced all simulated data feeds (`yfinance`) with a live connection to the MetaTrader 5 terminal.
+  - **Real-time Data:** The `mt5_bridge.py` script runs on the host machine, connects to the local MT5 terminal, and publishes live tick data to the RabbitMQ queue for the bot to consume.
+  - **Historical Data:** The `historical_data_importer.py` script runs on the host machine to download historical data from MT5 and save it as CSV files for backtesting.
+  - The bot's internal `start-realtime-feed` and `download-historical-data` commands have been updated to reflect this new workflow.
+- **Intermarket Analysis (Market Context Analysis)**
+  - **Correlation Matrix:** The `MarketContextAnalyzer` now calculates a full correlation matrix between all monitored symbols, providing a comprehensive view of market relationships.
+  - **Correlation Index:** The analyzer computes a "Correlation Index" for each asset, representing its average correlation with the rest of the market. This serves as an indicator for risk-on/risk-off sentiment.
+  - **Flexible Real-time Strategy:** The `RealtimeIntermarketAwareMovingAverageCrossoverStrategy` has been refactored to be more flexible, consuming the `MarketContextAnalyzer` directly to query needed correlations.
+  - **Upgraded `mt5_bridge.py`:** The bridge can publish data for multiple symbols, feeding the `MarketContextAnalyzer`.
+  - **Updated CLI:** The `start-trading-session` command now accepts a `--correlation-window-minutes` argument to configure the analyzer.
+  - **Bug Fixes:** Resolved multiple startup crashes related to incorrect credentials, `OrderManager` instantiation, and a `SyntaxError` in the web interface. Also fixed a hanging issue caused by the economic calendar loading in the main thread.
+- **Economic Data Integration (Market Context Analysis)**
+  - Created the `bot/economic_calendar.py` module using `investpy` to fetch economic event data.
+  - Added the `fetch-economic-events` command to the CLI (`main.py`) to allow users to view upcoming events.
+  - Integrated a feature into the `Consumer` to pause trading during a configurable quiet period around high-impact economic events.
+- **Dynamic Strategy Switching (Advanced Decision-Making)**
+  - Created `bot/strategy_selector.py` to act as a "master-mind" module that dynamically selects the best strategy based on market conditions.
+  - Refactored all strategies in `bot/realtime_strategies.py` to a common polymorphic interface (`generate_signal(context)`).
+  - Integrated the `StrategySelector` into `bot/consumer.py`, replacing the previous static strategy logic.
+  - Updated the `start-trading-session` command in `main.py`, removing the obsolete `--strategy` argument and streamlining the command.
+  - **Testing & Debugging:**
+    - Resolved multiple `ImportError: attempted relative import with no known parent package` errors by correcting import statements in `strategy_selector.py` and `realtime_strategies.py` to be direct instead of relative, accommodating the flat directory structure in the Docker container.
+    - Fixed a silent exit bug in `main.py` caused by an unconditional, leftover strategy instantiation.
+    - Fixed an `AttributeError` in `consumer.py` by correcting the candle history attribute from `.candles` to `.data` when creating the context for the selector.
+    - Resolved a `TypeError` by modifying `realtime_candle_pattern_detector.py` to return a list of dictionaries (with pattern `name` and `type`) instead of a list of strings, resolving a data format mismatch.
+    - Verified the complete functionality by running the `start-trading-session` command and observing the logs for the successful initialization and operation of the `StrategySelector`.
+- **Signal Confidence Scoring (Advanced Decision-Making)**
+  - Refactored `SignalScorer` to use a context-aware, multi-factor weighted average model. The new model includes technical signal, sentiment, themes, pattern strength, and volatility.
+  - Updated the `Consumer` to pass the full market context to the new scorer and to only place trades if the resulting confidence score exceeds a predefined threshold (e.g., 75).
+  - **Testing & Debugging:** Added debug logging to the `RealtimeMovingAverageCrossoverStrategy` to verify its internal state and diagnose the initial lack of signals, which led to identifying the cold-start problem.
+- **Regime-Aware Parameter Tuning (Advanced Decision-Making):
+  - The StrategySelector now adjusts strategy parameters from BEST_PARAMS based on the currently detected market regime (Trending, Ranging, Volatile).
+  - Default parameters are used for Unknown regimes.
+  - This allows the bot to use more appropriate settings, like longer moving averages in trending markets and shorter ones in ranging markets, without manual intervention.
+  - **Testing & Debugging:**
+    - Fixed a critical bug where the bot could not prime historical data due to a connection failure with the new `data_downloader_api.py` service. This involved multiple steps:
+      - Correcting several syntax errors in `data_downloader_api.py`.
+      - Changing the service's port from 9090 to 9091 to resolve a conflict.
+      - Updating the client in `bot/consumer.py` to call the new port.
+      - Fixing a logic error in `bot/consumer.py` to correctly handle the API's `202 Accepted` status code.
+    - Verified the end-to-end feature by observing logs for correct parameter adjustment based on the detected regime.
+- **Control Interface (User Interface and Reporting)**
+  - Basic Flask web interface for status monitoring and messaging.
+- **(Removed) Dynamic Control Interface (Confidence Threshold):**
+  - **Goal:** Allow real-time adjustment of the bot's confidence score threshold via the web interface.
+  - **Status:** This feature was implemented using both RabbitMQ and later a file-based polling system. However, both methods failed due to an intractable issue within the user's local Docker environment that prevented the running container from loading the updated code.
+  - **Resolution:** After extensive debugging, the feature was removed. The confidence threshold has been hardcoded to `40` in `bot/consumer.py`. All UI elements and background processes for dynamic updates have been removed to simplify the codebase and ensure stability.
+- **Redundancy System (Reliability Enhancements)**
+  - Created a reusable `retry_with_backoff` decorator in `bot/retry_utils.py` for robustly handling connection errors.
+  - Refactored `bot/postgresql_client.py` to use the retry decorator and added a `check_connection` method.
+  - Refactored `bot/influx_connector.py` to use the retry decorator for all operations and added a `check_connection` method.
+  - Made the RabbitMQ `Consumer` in `bot/consumer.py` resilient to connection loss by wrapping the consumption loop in an auto-reconnect mechanism.
+  - Implemented a heartbeat system in `mt5_bridge.py` to periodically signal its status.
+  - Created a standalone `mt5_watchdog.py` script to monitor the heartbeat and process status of the bridge, automatically restarting it upon failure.
+- **Documentation (Regulatory Compliance)**
+  - Created a comprehensive, detailed `README.md` file detailing the project's architecture, all features, setup, and usage instructions.
+- **Unstructured Data Analysis (Enhanced Keyword Extraction)**
+  - Integrated `yake` into `bot/news_fetcher.py` for robust keyword extraction.
+  - **Testing & Debugging:**
+    - Resolved a `ModuleNotFoundError` by fixing the Docker build process to correctly install the `yake` dependency. This involved adding a cache-busting line to the `bot/Dockerfile` to ensure `requirements.txt` changes were picked up.
+    - Fixed a bug in `news_fetcher.py` where the function processed news but failed to `return` the DataFrame.
+    - Verified the complete functionality by running the `fetch-news` command and inspecting the output CSV file to confirm the presence and correctness of the new `keywords` column.
+- **Unstructured Data Analysis (Thematic Analysis & Strategy)**
+  - Created `bot/thematic_analyzer.py` with a `ThematicAnalyzer` class to identify themes from keywords.
+  - Integrated the analyzer into `bot/news_fetcher.py` to add a `themes` column to the news data.
+  - Created the `RealtimeThematicStrategy` in `bot/realtime_strategies.py`.
+  - Integrated the new strategy into the `Consumer` and the `main.py` CLI, allowing it to be selected and configured with required themes.
+  - Verified the end-to-end logic. Although live news data was sparse, the strategy correctly generated `HOLD` signals when required themes were not present, confirming the logic is sound.
+
+- **Bug Fixes & Stability Improvements**
+  - **PostgreSQL Connection Failure:** Diagnosed and fixed a `Connection failed` error for the PostgreSQL database. The issue was a mismatch between the plain-text password used by the `postgresql` service and the encrypted password used by the `bot` service. The resolution was to simplify the architecture by removing the unnecessary encryption for this internal network connection and passing the plain-text credentials directly to the bot, ensuring they are always in sync.
+
+- **System Enhancements (Continuous Improvement)**
+  - **Real-time Strategy Priming:** Solved the "cold start" problem where strategies would not generate signals immediately after starting. The issue was caused by insufficient historical data for the strategies' warm-up periods. The resolution was to implement an automatic data download mechanism: if the bot detects insufficient historical data on startup, it now automatically requests the `data_downloader_api.py` service (running on the host) to download the required data from MT5, ensuring the data buffer is properly primed.
+
+- **System Enhancements (Continuous Improvement)**
+  - **Real-time Strategy Priming:** Solved the "cold start" problem where strategies would not generate signals immediately after starting. The issue was caused by insufficient historical data for the strategies' warm-up periods. The resolution was to use the `historical_data_importer.py` script to download a sufficient number of historical candles, ensuring the data buffer is properly primed when the bot starts.
+- **Automated Self-Optimization (Walk-Forward Optimization):** Implemented a walk-forward optimization system that periodically re-optimizes strategy parameters using recent market data. Added `walk-forward-optimize` CLI command, updated `optimization_suite.py` to return best params, integrated `BEST_PARAMS` into `StrategySelector` for dynamic parameter loading, ensuring strategies adapt to current market conditions.
+- **Automated Performance Review:** Implemented a performance review system that analyzes trading history from `trades.csv`, calculates metrics like total PnL, win rate, and hourly performance. Automatically disables underperforming strategies (e.g., if PnL < 0 and win rate < 50%, disables 'sentiment' strategy). Added `performance-review` CLI command, updated `StrategySelector` to skip disabled strategies, with persistence via `DISABLED_STRATEGIES` in `optimization_config.py`.
+
+- **Automated Strategy Discovery (Genetic Algorithm):** Implemented a system to autonomously discover new trading strategies using a genetic algorithm.
+  - Created `bot/genetic_algorithm.py` to house the core GA logic.
+  - Enhanced `bot/technical_indicators.py` with a full suite of indicators (SMA, EMA, RSI, MACD) to provide a feature set for the algorithm.
+  - Integrated the feature into the CLI with the `discover-strategies` command.
+  - **Debugging Journey:** This feature required a multi-step, extensive debugging process:
+    1.  Fixed multiple `SyntaxError`s in `technical_indicators.py` and `genetic_algorithm.py`.
+    2.  Resolved a data pipeline bug where `dropna()` was creating an empty DataFrame.
+    3.  Solved the "no trades" problem by identifying and fixing two critical, compounding bugs:
+        - **Initial Bug:** The strategy chromosome was too restrictive (`rule1 AND rule2`).
+        - **Critical Bug:** A fundamental incompatibility was discovered between the GA's "action-based" signals and the `BacktestingEngine`'s expectation of "position-based" signals.
+    4.  **Final Fix:** Rewrote the `generate_signals` method and fixed a final critical bug in the `BacktestingEngine`'s portfolio calculation logic.
+  - **Status:** The feature is now fully functional.
+
+- **Machine Learning Model Retraining:** Implemented a system to automatically retrain the ML model to prevent model drift.
+  - Added the `retrain-ml-model` command to `bot/main.py`.
+  - The command leverages existing functions in `MachineLearningStrategy` to train a new model on a specified dataset and overwrite the `ml_model.pkl` file.
+  - **Debugging Journey:** Fixed an `IndentationError` in `main.py` that was introduced while adding the CLI command.
+  - **Status:** The feature is implemented and verified.
+
+- **Dynamic Capital Allocation:** Implemented a system for the bot to manage capital at a portfolio level, deciding how much capital to allocate between different strategies based on their performance and market environment. This involved:
+    - Creating `bot/capital_allocator.py` to manage strategy performance and allocate capital.
+    - Modifying `StrategySelector` to accept and use the `CapitalAllocator` to filter strategies based on allocated capital.
+    - Modifying `OrderManager` to accept the `CapitalAllocator`.
+    - Modifying `Consumer` to accept the `CapitalAllocator` and use it to calculate allocated volume before placing trades.
+    - **Debugging Journey:** Fixed an `UnboundLocalError` and a `NameError` in `main.py` and a `TypeError` in `consumer.py` related to passing the `capital_allocator` object correctly through the system.
+    - **Status:** The feature is fully functional and integrated.
+
+- **Live vs. Paper Trading Abstraction:** Implemented a robust abstraction layer allowing the bot to seamlessly switch between live and paper trading modes via a `--mode` CLI flag. This involved:
+    - Adding a `--mode` flag to the `start-trading-session` command in `main.py`.
+    - Creating `bot/broker.py` with an abstract `Broker` base class, a `PaperBroker` for simulated execution, and a `LiveBroker` encapsulating RabbitMQ communication.
+    - Refactoring `OrderManager` to accept a `broker` object and delegate all order placement and account info requests to it.
+    - Refactoring `Consumer` to accept and pass the `broker` object to `OrderManager`.
+    - **Debugging Journey:** Fixed an `AttributeError` in `OrderManager` by correctly re-introducing the `request_account_info` method and delegating it to the broker.
+    - **Status:** The feature is fully functional and tested in both paper and live modes.
+
+- **Enhanced Monitoring & Alerting:** Implemented a real-time alerting system using Telegram for critical system events.
+  - Created `bot/telegram_notifier.py` with a `TelegramNotifier` class to send messages via the Telegram Bot API.
+  - Added `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` as environment variables to `docker-compose.yml` to securely handle credentials.
+  - Integrated the notifier into `bot/consumer.py` to send alerts for:
+    - Successful initialization.
+    - RabbitMQ connection errors.
+    - Critical exceptions during message processing.
+    - Generation of trade signals that pass the confidence threshold.
+    - SL/TP hits and trailing stop updates for open positions.
+    - Pausing of trading due to economic event quiet periods.
+  - Integrated the notifier into `bot/order_manager.py` to send alerts for:
+    - Successful trade placement.
+    - Failed trade placements.
+    - Critical database connection errors.
+  - **Debugging Journey:**
+    1.  Fixed a `TypeError` in `web_interface.py` which was crashing the web server on startup due to an old, redundant `MarketDataConsumer` class. This was resolved by surgically removing the broken consumer and the single API endpoint that depended on it.
+    2.  Fixed an `AttributeError: 'PaperBroker' object has no attribute 'mode'` by adding a `mode` attribute to both the `PaperBroker` and `LiveBroker` classes, ensuring a consistent interface for the notification service.
+    3.  Guided the user to run the correct `start-trading-session` command via `docker-compose exec` to properly test the feature, as `docker-compose up` only starts the web interface.
+  - **Status:** The feature is fully implemented and verified.
+
+**Unimplemented Features:**
+
+- **Control Interface (User Interface and Reporting)** (In Progress)
+- **Redundancy System (Reliability Enhancements)** (Partially Implemented)
+- **Trading Compliance (Regulatory Compliance)** (Paused)
+- **System Maintenance (Continuous Improvement)** (Not Started)
+- **High-Availability & Failover:** (Skipped for now)
+
+
+### Final Roadmap: The Advanced Autonomous Trading System
+
+This roadmap outlines the evolution from a strategy-driven bot to a fully autonomous system capable of independent market analysis, decision-making, execution, portfolio management, and self-improvement.
+
+**Phase A: Enhanced Market Intelligence (Perception)**
+*Goal: To build a comprehensive, real-time understanding of the market from multiple data sources.*
+- **Intermarket Analysis:** (Implemented)
+- **Economic Data Integration:** (Implemented)
+- **Real-time Candlestick Pattern Detection:** (Implemented)
+- **Unstructured Data Analysis:** (Implemented)
+
+**Phase B: Advanced Decision-Making (Cognition)**
+*Goal: To move from executing predefined strategies to making dynamic, context-aware trading decisions.*
+- **Signal Confidence Scoring:** (Implemented)
+- **Dynamic Strategy Switching (Meta-Strategy):** (Implemented)
+- **Regime-Aware Parameter Tuning:** (Implemented)
+
+**Phase C: Autonomous Execution & Management (Action)**
+*Goal: To give the bot the ability to execute and manage its own trades directly and intelligently.*
+- **Direct MT5 Trade Execution Bridge:** (Implemented)
+- **Automated Trade Lifecycle Management:** (Implemented) The bot now autonomously manages the entire lifecycle of a trade. The `OrderManager` was refactored to use a PostgreSQL database for persistence, ensuring that trades are not lost. On startup, the `Consumer` process automatically loads any open trades from the database and begins managing them (applying SL/TP, trailing stops, etc.). This was verified by restarting the system, starting only the core services (`docker-compose up -d`) and the `mt5_watchdog`, and observe the logs to confirm the `_manage_open_positions` function correctly managed a trade from the previous session.
+- **Advanced Portfolio Risk & Position Sizing:** (Implemented) Implemented and tested the core risk management functions in `OrderManager`: `calculate_dynamic_position_size`, `adjust_position_size_account_based`, and `manage_comprehensive_risk`. This involved a major debugging session where we discovered the functions were initially missing. We then implemented them, but found a critical bug in the position size calculation, which was fixed and verified. This work also required adding a new feature to fetch the live account balance from MT5, as the bot was using a hardcoded value. This was implemented using a request/response pattern over RabbitMQ, where the bot requests the info and the `mt5_order_executor` provides it.
+
+**Phase D: Self-Improvement & Adaptation (Learning)**
+*Goal: To enable the bot to learn from its own performance and adapt to changing market dynamics over time.*
+- **Automated Self-Optimization (Walk-Forward Optimization):** (Implemented) The bot will periodically and automatically re-optimize its strategy parameters on the most recent market data to prevent strategy decay.
+- **Automated Performance Review:** (Implemented) The system will analyze its own trading history to identify weaknesses, such as strategies that underperform during specific market hours or conditions, and can automatically disable or adjust them.
+- **Automated Strategy Discovery:** (Implemented) Using techniques like genetic algorithms, the bot will actively seek to discover new, profitable trading strategies by. Promising discoveries will be promoted to its active strategy arsenal.
+- **Machine Learning Model Retraining:** (Implemented) For ML-based strategies, the bot will automatically trigger and manage the retraining of its models with new data to prevent model drift.
+
+**Phase E: Production Hardening & Resilience**
+*Goal: To ensure the system is robust, reliable, and ready for live market deployment.*
+- **Live vs. Paper Trading Abstraction:** (Implemented) Maintain a clean, simple switch to move the entire system between a live trading account and a paper trading account for safe testing and deployment.
+- **High-Availability & Failover:** (Skipped for now) Implement a redundancy mechanism where a backup bot instance can automatically take over if the primary system fails, ensuring near-continuous operation.
+
+**Phase F: Portfolio Intelligence & Explainability (Wisdom)** (Completed)
+*Goal: To elevate the bot to a portfolio manager and make its complex reasoning transparent.*
+- **Dynamic Capital Allocation:** (Implemented) Implemented a system for the bot to manage capital at a portfolio level, deciding how much capital to allocate between different strategies based on their performance and market environment. This involved:
+    - Creating `bot/capital_allocator.py` to manage strategy performance and allocate capital.
+    - Modifying `StrategySelector` to accept and use the `CapitalAllocator` to filter strategies based on allocated capital.
+    - Modifying `OrderManager` to accept the `CapitalAllocator`.
+    - Modifying `Consumer` to accept the `CapitalAllocator` and use it to calculate allocated volume before placing trades.
+    - **Debugging Journey:** Fixed an `UnboundLocalError` and a `NameError` in `main.py` and a `TypeError` in `consumer.py` related to passing the `capital_allocator` object correctly through the system.
+    - **Status:** The feature is fully functional and integrated.
+
+- **Explainable AI (XAI) & Auditing:** (Implemented) Enhanced the bot's logging to provide human-readable decision rationales, detailing factors and confidence scores for actions. The 'Visual Audit Trail' component was deemed unnecessary for now.
+  - Enhanced logging in `bot/consumer.py` to detail strategy selection, signal generation, confidence scores, and calculated trade volumes.
+  - Enhanced logging in `bot/strategy_selector.py` to explain why strategies were chosen or not chosen, including market regime, sentiment, patterns, and capital allocation.
+  - **Status:** The decision rationale logging is fully functional. The visual audit trail component was skipped as per user requ
+---
+
+**Remaining Roadmap Items:**
+
+- **Control Interface (User Interface and Reporting)** (Completed)
+  - *Status:* Basic Flask web interface for status monitoring and messaging is implemented. Further UI/reporting features are deferred for now.
+
+- **Redundancy System (Reliability Enhancements)** (Completed)
+  - *Status:* A full high-availability and failover system has been implemented and tested.
+  - **Leader Election:** A leader election mechanism was created using PostgreSQL advisory locks. This ensures that only one bot instance is the active "leader" at any given time.
+  - **Follower Monitoring:** Standby "follower" instances constantly monitor the leader's heartbeat.
+  - **Automatic Failover:** If the leader crashes or its heartbeat stops, a follower automatically detects the failure, acquires the leader lock, and promotes itself to the new leader, seamlessly taking over the trading operations. This was successfully verified by manually stopping the leader instance and observing the follower take over.
+
+- **Trading Compliance (Regulatory Compliance)** (In Progress)
+  - *Status:* Feature development is now active.
+
+- **System Maintenance (Continuous Improvement)** (Not Started)
+  - *Status:* General system maintenance and continuous improvement tasks are ongoing but not explicitly defined as a feature yet.
+
+- **High-Availability & Failover:** (Skipped for now)
+  - *Status:* Implementation of a redundancy mechanism for automatic takeover by a backup bot instance is deferred until later.
+
+---
+### Telegram Interface (telegram-int-roadmap) (Completed)
+
+**Phase 1: Foundational Setup (Completed)**
+- Create `bot/telegram_interface.py` to house the new interface logic.
+- Implement a basic polling loop within the script to get new messages from the Telegram API.
+- Create a simple command parser to recognize messages starting with `/`.
+- Implement a `/start` command that replies with a welcome message and a list of available commands.
+
+**Phase 2: Core Feature Migration (Completed)**
+- Implement the `/status` command to check and report the status of RabbitMQ, InfluxDB, and PostgreSQL.
+- Implement the `/positions` command to fetch and display open trades from the database.
+- Implement the `/events` command to show upcoming high-impact economic events.
+- Implement a `/send <queue> <message>` command to replicate the test message publisher functionality.
+
+**Phase 3: Beautification & User Experience (Completed)**
+- Introduce a main menu using a persistent Telegram Keyboard for one-tap access to common commands (e.g., `/status`, `/positions`).
+- Refactor command responses to use proper Telegram Markdown formatting for better readability (e.g., code blocks for data, bolding for titles).
+- Implement Inline Keyboards for interactive commands. For example, after calling `/positions`, the bot could reply with buttons to refresh the list or view details of a specific trade.
+
+**Phase 4: Advanced Control & New Features (Completed)**
+- Implement a `/trade` command with inline buttons to allow placing simple market orders directly from Telegram (Note: This requires careful security considerations and confirmations).
+- Implement a `/performance` command to retrieve and display key performance indicators (KPIs) from the database.
+- Implement a `/logs` command to retrieve the last N lines from the bot's log file for remote debugging.
+
+**Debugging & Hardening Journey:**
+- **Trade Confirmation:** Implemented a confirmation step for the `/trade` command using inline keyboards to prevent accidental orders. Fixed a bug in the callback data format that caused parsing errors (`too many values to unpack`).
+- **Database Synchronization:** Resolved a critical bug where the `mt5_order_executor.py` was not updating the PostgreSQL database after opening or closing trades.
+  - **Connection Failure:** Fixed a `no password supplied` error by creating a `.env` file to provide the host-side executor with the correct database credentials and hostname (`localhost`).
+  - **Schema Mismatch:** Fixed a `column does not exist` error by modifying the executor's database functions (`update_trade_in_db`, `insert_trade_in_db`) to match the actual `trades` table schema.
+  - **Ghost Position Cleanup:** Implemented logic in the executor to automatically mark trades as `closed` in the database if they cannot be found in the MT5 terminal.
+- **Parameter Validation:** Fixed a `Missing required parameters` error in the `execute_market_order` function that incorrectly flagged a placeholder price as a missing parameter.
+- **Missing Method:** Added the `fetch_one` method to the `PostgreSQLConnector` class to resolve an `AttributeError` when closing trades.
+
+### Telegram Web App Integration (telegram-webapp-roadmap)
+
+This roadmap outlines the plan to integrate the existing Flask web UI as a Telegram Web App, making it accessible directly within the Telegram chat.
+
+**Phase 1: Core Integration (Completed)**
+- **Expose the Web App:** The local Flask server (running on port 5000) must be made publicly accessible via a secure HTTPS URL. For local development, a tunneling service like `ngrok` is recommended (`ngrok http 5000`).
+- **Add `/webapp` Command:** Implement a new `/webapp` command in `telegram_interface.py`.
+- **Create Web App Button:** The `/webapp` command will send a message with a special inline button that contains a `web_app` field pointing to the public URL of the web interface.
+- **Remove Login Authentication:** Removed session-based login authentication from the Flask web UI, making all pages publicly accessible.
+
+**Phase 2: UI/UX Enhancements (Completed)**
+- **Include Telegram JS Script:** Added Telegram's official Web App JavaScript file (`telegram-web-app.js`) to the Flask app's base HTML template to enable communication between the web app and the Telegram client.
+- **Dynamic Theme Matching:** Modified the web app's CSS to use Telegram's theme variables (e.g., `var(--tg-theme-bg-color)`) to make the UI seamlessly match the user's Telegram theme (light or dark).
+- **Haptic Feedback:** Utilized the Web App API to provide haptic feedback (e.g., `Telegram.WebApp.HapticFeedback.notificationOccurred('success')`) for user actions to create a more native feel.
+- **Set Web App Header Color:** Added JavaScript to dynamically set the Telegram Web App's header color to match the user's Telegram theme.
+- **Expand Web App:** Added JavaScript to force the Telegram Web App to expand to full height upon loading.
+- **Hide Web App's Own Navbar:** Added JavaScript to hide the web app's Bootstrap navbar when running inside Telegram, preventing a double header.
+
+**Phase 3: Bi-directional Communication (Completed)**
+- **Send Data to Bot:** Implemented a JavaScript function in the web app that uses `Telegram.WebApp.sendData()` to send information from the web app back to the bot.
+- **Receive Data in Bot:** Enhanced the `telegram_interface.py` polling loop to check for and process `web_app_data` messages sent from the web app.
+- **Debugging Journey:** This feature required extensive debugging. The `sendData()` function was not being received by the bot, even though it was being called correctly from the web app. The issue is likely with the Telegram client or API. The user has been advised to update their client or try a different one. A workaround using a direct HTTP request may be needed if the issue persists.
+
