@@ -46,7 +46,7 @@ services:
     image: wrouesnel/postgres_exporter:latest
     hostname: postgres_exporter
     environment:
-      DATA_SOURCE_NAME: "postgresql://95263781:InL!VoW3@postgresql:5432/mt5_trade_records?sslmode=disable"
+      DATA_SOURCE_NAME: ""
     ports:
       - "9187:9187"
     networks:
@@ -73,23 +73,23 @@ services:
       - "5000"
 #      - "8000:8000" # Prometheus metrics port
     environment:
-      TELEGRAM_WEB_APP_URL: "https://uncheaply-unresounded-saul.ngrok-free.dev"
-      ENCRYPTION_KEY: "jDvau9_2I9zMEPpm-wdYPvBWfIxqUQyGFnEProcaQ-g="
+      TELEGRAM_WEB_APP_URL: ""
+      ENCRYPTION_KEY: "="
       ENCRYPTED_BROKER_USER: "gAAAAABonJ3Ss6l39bIASjFwxTfVbgdcTBKvkcvwmQN1taFR40qzYfKxfzSOhfAMXBrtnTegqtHVP6RqZcxxi7kcyCSX5rYe-A=="
       ENCRYPTED_BROKER_PASS: "gAAAAABonJ8BYK9zHfWeiutwing-tp8ZUVyOr_A1Jn957DqQKas3JusbKcdtso4Ji8t7NagFXyIRLdGZIg9mUxcnFe2Z0cEipg=="
       ENCRYPTED_INFLUXDB_TOKEN: "gAAAAABonJ-7K5b7KUj6Ym8XoXKNZdBorQ7GcOtJ1i1a8cDGesHq3Gx3VuJyo4sYTYZz6LpIH3-9_9Ce5HIxefcwZC7au7NjCw=="
-      POSTGRES_USER: "95263781"
-      POSTGRES_PASSWORD: "InL!VoW3"
-      ALPHA_VANTAGE_API_KEY: "HDBR1V1QZ0PA82U8"
-      ENCRYPTED_MT5_ACCOUNT: "gAAAAABo1cq3dZc49lEgavtF213-5MhMIWswxHR6hDhkIFWTHy4nDZ-c83fednqzKBaXimABt95sfF2qsg8BBI_BHkis9B_l6g=="
-      ENCRYPTED_MT5_PASSWORD: "gAAAAABo1cq3N2v8K5BJsjcoFK6o822han6E2K7vOCDkcLZwpw4oZ8iEdz-P2Zs9mUDWgYTVNkSQbEbd1fTLWHVXkwNMSF9LLg=="
+      POSTGRES_USER: ""
+      POSTGRES_PASSWORD: ""
+      ALPHA_VANTAGE_API_KEY: ""
+      ENCRYPTED_MT5_ACCOUNT: "=="
+      ENCRYPTED_MT5_PASSWORD: "=="
       MT5_SERVER: "MetaQuotes-Demo"
       BROKER_HOST: "rabbitmq"
       PG_DBNAME: "mt5_trade_records"
       PG_HOST: "postgresql"
       PG_PORT: "5432"
-      TELEGRAM_BOT_TOKEN: "8457857593:AAHk-4lnfyXOZ7s8gXDKurjDbTZ_p1vpvv8"
-      TELEGRAM_CHAT_ID: "6898264540"
+      TELEGRAM_BOT_TOKEN: ""
+      TELEGRAM_CHAT_ID: ""
       INFLUXDB_URL: "http://influxdb:8086"
       INFLUXDB_ORG: ""
       INFLUXDB_BUCKET: "mt5_market_data"
